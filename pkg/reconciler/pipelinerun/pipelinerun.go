@@ -83,6 +83,9 @@ const (
 	// ReasonCouldntGetCondition indicates that the reason for the failure status is that the
 	// associated Pipeline's Conditions couldn't all be retrieved
 	ReasonCouldntGetCondition = "CouldntGetCondition"
+	// ReasonParameterMissing indicates that the reason for the failure status is that the
+	// associated PipelineRun didn't provide all the required parameters
+	ReasonParameterMissing = "ParameterMissing"
 	// ReasonFailedValidation indicates that the reason for failure status is
 	// that pipelinerun failed runtime validation
 	ReasonFailedValidation = "PipelineValidationFailed"
@@ -228,10 +231,6 @@ func (c *Reconciler) updatePipelineResults(ctx context.Context, pr *v1beta1.Pipe
 	}
 	_, pipelineSpec, err := resources.GetPipelineData(ctx, pr, resolver.GetPipeline)
 	if err != nil {
-		if ce, ok := err.(*v1beta1.CannotConvertError); ok {
-			pr.Status.MarkResourceNotConvertible(ce)
-			return
-		}
 		logger.Errorf("Failed to determine Pipeline spec to use for pipelinerun %s: %v", pr.Name, err)
 		pr.Status.MarkFailed(ReasonCouldntGetPipeline,
 			"Error retrieving pipeline for pipelinerun %s/%s: %s",
@@ -255,10 +254,6 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1beta1.PipelineRun) err
 	}
 	pipelineMeta, pipelineSpec, err := resources.GetPipelineData(ctx, pr, resolver.GetPipeline)
 	if err != nil {
-		if ce, ok := err.(*v1beta1.CannotConvertError); ok {
-			pr.Status.MarkResourceNotConvertible(ce)
-			return nil
-		}
 		logger.Errorf("Failed to determine Pipeline spec to use for pipelinerun %s: %v", pr.Name, err)
 		pr.Status.MarkFailed(ReasonCouldntGetPipeline,
 			"Error retrieving pipeline for pipelinerun %s/%s: %s",
@@ -318,6 +313,14 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1beta1.PipelineRun) err
 		pr.Status.MarkFailed(ReasonCouldntGetResource,
 			"PipelineRun %s/%s can't be Run; it tries to bind Resources that don't exist: %s",
 			pipelineMeta.Namespace, pr.Name, err)
+		return nil
+	}
+	// Ensure that the PipelineRun provides all the parameters required by the Pipeline
+	if err := resources.ValidateRequiredParametersProvided(&pipelineSpec.Params, &pr.Spec.Params); err != nil {
+		// This Run has failed, so we need to mark it as failed and stop reconciling it
+		pr.Status.MarkFailed(ReasonParameterMissing,
+			"PipelineRun %s parameters is missing some parameters required by Pipeline %s's parameters: %s",
+			pr.Namespace, pr.Name, err)
 		return nil
 	}
 
@@ -426,9 +429,51 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1beta1.PipelineRun) err
 		}
 	}
 
+	as, err := artifacts.InitializeArtifactStorage(c.Images, pr, pipelineSpec, c.KubeClientSet, logger)
+	if err != nil {
+		logger.Infof("PipelineRun failed to initialize artifact storage %s", pr.Name)
+		return err
+	}
+
+	// When the pipeline run is stopping, we don't schedule any new task and only
+	// wait for all running tasks to complete and report their status
+	if !pipelineState.IsStopping() {
+		err = c.runNextSchedulableTask(ctx, pr, d, pipelineState, as)
+		if err != nil {
+			return err
+		}
+	}
+
+	before := pr.Status.GetCondition(apis.ConditionSucceeded)
+	after := resources.GetPipelineConditionStatus(pr, pipelineState, logger, d)
+	switch after.Status {
+	case corev1.ConditionTrue:
+		pr.Status.MarkSucceeded(after.Reason, after.Message)
+	case corev1.ConditionFalse:
+		pr.Status.MarkFailed(after.Reason, after.Message)
+	case corev1.ConditionUnknown:
+		pr.Status.MarkRunning(after.Reason, after.Message)
+	}
+	// Read the condition the way it was set by the Mark* helpers
+	after = pr.Status.GetCondition(apis.ConditionSucceeded)
+	events.Emit(recorder, before, after, pr)
+
+	pr.Status.TaskRuns = getTaskRunsStatus(pr, pipelineState)
+	logger.Infof("PipelineRun %s status is being set to %s", pr.Name, after)
+	return nil
+}
+
+// runNextSchedulableTask gets the next schedulable Tasks from the dag based on the current
+// pipeline run state, and starts them
+func (c *Reconciler) runNextSchedulableTask(ctx context.Context, pr *v1beta1.PipelineRun, d *dag.Graph, pipelineState resources.PipelineRunState, as artifacts.ArtifactStorageInterface) error {
+
+	logger := logging.FromContext(ctx)
+	recorder := controller.GetEventRecorder(ctx)
+
 	candidateTasks, err := dag.GetSchedulable(d, pipelineState.SuccessfulPipelineTaskNames()...)
 	if err != nil {
 		logger.Errorf("Error getting potential next tasks for valid pipelinerun %s: %v", pr.Name, err)
+		return nil
 	}
 
 	nextRprts := pipelineState.GetNextTasks(candidateTasks)
@@ -439,13 +484,6 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1beta1.PipelineRun) err
 		return nil
 	}
 	resources.ApplyTaskResults(nextRprts, resolvedResultRefs)
-
-	var as artifacts.ArtifactStorageInterface
-
-	if as, err = artifacts.InitializeArtifactStorage(c.Images, pr, pipelineSpec, c.KubeClientSet, logger); err != nil {
-		logger.Infof("PipelineRun failed to initialize artifact storage %s", pr.Name)
-		return err
-	}
 
 	for _, rprt := range nextRprts {
 		if rprt == nil {
@@ -467,20 +505,6 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1beta1.PipelineRun) err
 			}
 		}
 	}
-	before := pr.Status.GetCondition(apis.ConditionSucceeded)
-	after := resources.GetPipelineConditionStatus(pr, pipelineState, logger, d)
-	switch after.Status {
-	case corev1.ConditionTrue:
-		pr.Status.MarkSucceeded(after.Reason, after.Message)
-	case corev1.ConditionFalse:
-		pr.Status.MarkFailed(after.Reason, after.Message)
-	case corev1.ConditionUnknown:
-		pr.Status.MarkRunning(after.Reason, after.Message)
-	}
-	events.Emit(recorder, before, after, pr)
-
-	pr.Status.TaskRuns = getTaskRunsStatus(pr, pipelineState)
-	logger.Infof("PipelineRun %s status is being set to %s", pr.Name, after)
 	return nil
 }
 
