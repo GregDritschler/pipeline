@@ -32,6 +32,10 @@ type Interface interface {
 	PipelineRuns() PipelineRunInformer
 	// Tasks returns a TaskInformer.
 	Tasks() TaskInformer
+	// TaskLoops returns a TaskLoopInformer.
+	TaskLoops() TaskLoopInformer
+	// TaskLoopRuns returns a TaskLoopRunInformer.
+	TaskLoopRuns() TaskLoopRunInformer
 	// TaskRuns returns a TaskRunInformer.
 	TaskRuns() TaskRunInformer
 }
@@ -65,6 +69,16 @@ func (v *version) PipelineRuns() PipelineRunInformer {
 // Tasks returns a TaskInformer.
 func (v *version) Tasks() TaskInformer {
 	return &taskInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskLoops returns a TaskLoopInformer.
+func (v *version) TaskLoops() TaskLoopInformer {
+	return &taskLoopInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskLoopRuns returns a TaskLoopRunInformer.
+func (v *version) TaskLoopRuns() TaskLoopRunInformer {
+	return &taskLoopRunInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // TaskRuns returns a TaskRunInformer.

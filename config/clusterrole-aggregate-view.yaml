@@ -30,6 +30,8 @@ rules:
   - pipelineruns
   - pipelineresources
   - conditions
+  - taskloops
+  - taskloopruns
   verbs:
   - get
   - list

@@ -46,6 +46,22 @@ type TaskListerExpansion interface{}
 // TaskNamespaceLister.
 type TaskNamespaceListerExpansion interface{}
 
+// TaskLoopListerExpansion allows custom methods to be added to
+// TaskLoopLister.
+type TaskLoopListerExpansion interface{}
+
+// TaskLoopNamespaceListerExpansion allows custom methods to be added to
+// TaskLoopNamespaceLister.
+type TaskLoopNamespaceListerExpansion interface{}
+
+// TaskLoopRunListerExpansion allows custom methods to be added to
+// TaskLoopRunLister.
+type TaskLoopRunListerExpansion interface{}
+
+// TaskLoopRunNamespaceListerExpansion allows custom methods to be added to
+// TaskLoopRunNamespaceLister.
+type TaskLoopRunNamespaceListerExpansion interface{}
+
 // TaskRunListerExpansion allows custom methods to be added to
 // TaskRunLister.
 type TaskRunListerExpansion interface{}

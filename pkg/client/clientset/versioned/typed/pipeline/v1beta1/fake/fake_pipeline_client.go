@@ -44,6 +44,14 @@ func (c *FakeTektonV1beta1) Tasks(namespace string) v1beta1.TaskInterface {
 	return &FakeTasks{c, namespace}
 }
 
+func (c *FakeTektonV1beta1) TaskLoops(namespace string) v1beta1.TaskLoopInterface {
+	return &FakeTaskLoops{c, namespace}
+}
+
+func (c *FakeTektonV1beta1) TaskLoopRuns(namespace string) v1beta1.TaskLoopRunInterface {
+	return &FakeTaskLoopRuns{c, namespace}
+}
+
 func (c *FakeTektonV1beta1) TaskRuns(namespace string) v1beta1.TaskRunInterface {
 	return &FakeTaskRuns{c, namespace}
 }

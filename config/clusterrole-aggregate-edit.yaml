@@ -31,6 +31,8 @@ rules:
   - pipelineruns
   - pipelineresources
   - conditions
+  - taskloops
+  - taskloopruns
   verbs:
   - create
   - delete

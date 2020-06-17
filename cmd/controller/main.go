@@ -21,6 +21,7 @@ import (
 
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/reconciler/pipelinerun"
+	"github.com/tektoncd/pipeline/pkg/reconciler/tasklooprun"
 	"github.com/tektoncd/pipeline/pkg/reconciler/taskrun"
 	corev1 "k8s.io/api/core/v1"
 	"knative.dev/pkg/injection"
@@ -36,9 +37,9 @@ const (
 var (
 	entrypointImage = flag.String("entrypoint-image", "override-with-entrypoint:latest",
 		"The container image containing our entrypoint binary.")
-	nopImage               = flag.String("nop-image", "tianon/true", "The container image used to stop sidecars")
+	nopImage = flag.String("nop-image", "tianon/true", "The container image used to stop sidecars")
 	affinityAssistantImage = flag.String("affinity-assistant-image", "nginx", "The container image used for the Affinity Assistant")
-	gitImage               = flag.String("git-image", "override-with-git:latest",
+	gitImage = flag.String("git-image", "override-with-git:latest",
 		"The container image containing our Git binary.")
 	credsImage = flag.String("creds-image", "override-with-creds:latest",
 		"The container image for preparing our Build's credentials.")
@@ -74,5 +75,6 @@ func main() {
 	sharedmain.MainWithContext(injection.WithNamespaceScope(signals.NewContext(), *namespace), ControllerLogKey,
 		taskrun.NewController(*namespace, images),
 		pipelinerun.NewController(*namespace, images),
+		tasklooprun.NewController(*namespace, images),
 	)
 }
