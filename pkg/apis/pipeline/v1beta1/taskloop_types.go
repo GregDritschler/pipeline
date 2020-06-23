@@ -64,8 +64,9 @@ type TaskLoopTask struct {
 	Params []Param `json:"params,omitempty"`
 
 	// Time after which the TaskRun times out.
+	// This has type string instead of Duration to support parameter substitution.
 	// +optional
-	Timeout *metav1.Duration `json:"timeout,omitempty"`
+	Timeout string `json:"timeout,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

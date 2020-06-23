@@ -62,6 +62,11 @@ func ApplyParameters(spec *v1beta1.TaskLoopSpec, run *v1beta1.TaskLoopRun) *v1be
 	}
 	spec.WithItems = newItems
 
+	// Perform substitution for timeout
+	if spec.Task.Timeout != "" {
+		spec.Task.Timeout = substitution.ApplyReplacements(spec.Task.Timeout, stringReplacements)
+	}
+
 	return spec
 }
 

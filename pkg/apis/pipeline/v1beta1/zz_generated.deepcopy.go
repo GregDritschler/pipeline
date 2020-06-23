@@ -1459,11 +1459,6 @@ func (in *TaskLoopTask) DeepCopyInto(out *TaskLoopTask) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Timeout != nil {
-		in, out := &in.Timeout, &out.Timeout
-		*out = new(metav1.Duration)
-		**out = **in
-	}
 	return
 }
 

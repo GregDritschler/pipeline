@@ -18,22 +18,26 @@ package tasklooprun
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
 	"time"
 
-	"github.com/tektoncd/pipeline/pkg/apis/config"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	clientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	tasklooprunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1beta1/tasklooprun"
 	listers "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/names"
+	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	"github.com/tektoncd/pipeline/pkg/reconciler/tasklooprun/resources"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis"
+	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 )
@@ -55,7 +59,6 @@ type Reconciler struct {
 	taskLoopLister    listers.TaskLoopLister
 	taskLoopRunLister listers.TaskLoopRunLister
 	taskRunLister     listers.TaskRunLister
-	// TODO: Add recorder and utilize for events
 }
 
 var (
@@ -69,6 +72,7 @@ var (
 func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 	logger.Infof("Reconciling TaskLoopRun %s/%s at %v", tlr.Namespace, tlr.Name, time.Now())
+	recorder := controller.GetEventRecorder(ctx)
 
 	// If the TaskLoopRun has not started, initialize the Condition and set the start time.
 	if !tlr.IsStarted() {
@@ -79,11 +83,18 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 			logger.Warnf("TaskLoopRun %s createTimestamp %s is after the TaskLoopRun started %s", tlr.Name, tlr.CreationTimestamp, tlr.Status.StartTime)
 			tlr.Status.StartTime = &tlr.CreationTimestamp
 		}
+		// Emit events. During the first reconcile the status of the TaskLoopRun may change twice
+		// from not Started to Started and then to Running, so we need to sent the event here
+		// and at the end of 'Reconcile' again.
+		// We also want to send the "Started" event as soon as possible for anyone who may be waiting
+		// on the event to perform user facing initialisations, such has reset a CI check status
+		afterCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
+		events.Emit(recorder, nil, afterCondition, tlr)
 	}
 
 	if tlr.IsDone() {
 		logger.Infof("TaskLoopRun %s/%s is done", tlr.Namespace, tlr.Name)
-		// TODO: Implement (not sure yet what needs to be done here other than bailing)
+		// TODO: metrics (metrics.DurationAndCount)
 		return nil
 	}
 
@@ -92,6 +103,9 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 		// TODO: Implement cancel (cascade it to child taskruns)
 		return nil
 	}
+
+	// Store the condition before reconcile
+	beforeCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
 
 	// Reconcile this copy of the TaskLoopRun
 	err := c.reconcile(ctx, tlr)
@@ -103,6 +117,9 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 		logger.Warn("Failed to update TaskLoopRun labels/annotations", zap.Error(err))
 		// TODO: Include in multierror
 	}
+
+	afterCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
+	events.Emit(recorder, beforeCondition, afterCondition, tlr)
 
 	// TODO: Need to implement the multierror stuff?
 	return err
@@ -161,6 +178,30 @@ func (c *Reconciler) reconcile(ctx context.Context, tlr *v1beta1.TaskLoopRun) er
 	// This resolves the withItems key which is necessary to determine the next item.
 	taskLoopSpec = resources.ApplyParameters(taskLoopSpec, tlr)
 
+	// Parse the task timeout.  Since this field supports parameter substitution
+	// this must be done after the call to ApplyParameters.
+	var timeout *metav1.Duration
+	if taskLoopSpec.Task.Timeout != "" {
+		duration, err := time.ParseDuration(taskLoopSpec.Task.Timeout)
+		if err != nil {
+			tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonFailedValidation.String(),
+				"The timeout value in TaskLoop %s/%s is not valid: %s",
+				taskLoopMeta.Namespace, taskLoopMeta.Name, err)
+			return nil
+		}
+		if duration < 0 {
+			tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonFailedValidation.String(),
+				"The timeout value in TaskLoop %s/%s is negative",
+				taskLoopMeta.Namespace, taskLoopMeta.Name)
+			return nil
+		}
+		timeout = &metav1.Duration{Duration: duration}
+	} else {
+		// If there is no timeout then do not pass a timeout on the TaskRun.
+		// The TaskRun will use the default timeout.
+		timeout = nil
+	}
+
 	// Move on to the next iteration (or the first iteration if there was no TaskRun).
 	// Check if the TaskLoopRun is done.
 	nextIteration := highestIteration + 1
@@ -174,7 +215,7 @@ func (c *Reconciler) reconcile(ctx context.Context, tlr *v1beta1.TaskLoopRun) er
 	taskLoopSpec = resources.ApplyItem(taskLoopSpec, taskLoopSpec.WithItems[nextIteration-1])
 
 	// Create a TaskRun to run this iteration.
-	tr, err := c.createTaskRun(logger, taskLoopSpec, tlr, nextIteration)
+	tr, err := c.createTaskRun(logger, taskLoopSpec, tlr, nextIteration, timeout)
 	if err != nil {
 		return fmt.Errorf("error creating TaskRun from TaskLoopRun %s: %w", tlr.Name, err)
 	}
@@ -248,7 +289,7 @@ func (c *Reconciler) updateTaskrunStatus(logger *zap.SugaredLogger, tlr *v1beta1
 	return highestIteration, highestIterationTr, nil
 }
 
-func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tl *v1beta1.TaskLoopSpec, tlr *v1beta1.TaskLoopRun, iteration int) (*v1beta1.TaskRun, error) {
+func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tl *v1beta1.TaskLoopSpec, tlr *v1beta1.TaskLoopRun, iteration int, timeout *metav1.Duration) (*v1beta1.TaskRun, error) {
 
 	// TODO: Investigate how task retries will be implemented.
 
@@ -266,7 +307,7 @@ func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tl *v1beta1.TaskLo
 		Spec: v1beta1.TaskRunSpec{
 			Params:             tl.Task.Params,
 			ServiceAccountName: tlr.Spec.ServiceAccountName,
-			Timeout:            getTaskRunTimeout(tl),
+			Timeout:            timeout,
 			PodTemplate:        nil, // TODO: Implement pod template
 		}}
 
@@ -290,13 +331,17 @@ func (c *Reconciler) updateLabelsAndAnnotations(tlr *v1beta1.TaskLoopRun) error 
 		return fmt.Errorf("error getting TaskLoopRun %s when updating labels/annotations: %w", tlr.Name, err)
 	}
 	if !reflect.DeepEqual(tlr.ObjectMeta.Labels, newTlr.ObjectMeta.Labels) || !reflect.DeepEqual(tlr.ObjectMeta.Annotations, newTlr.ObjectMeta.Annotations) {
-		// Note that this uses Update vs. Patch because the former is significantly easier to test.
-		// If we want to switch this to Patch, then we will need to teach the utilities in test/controller.go
-		// to deal with Patch (setting resourceVersion, and optimistic concurrency checks).
-		newTlr = newTlr.DeepCopy()
-		newTlr.Labels = tlr.Labels
-		newTlr.Annotations = tlr.Annotations
-		_, err := c.PipelineClientSet.TektonV1beta1().TaskLoopRuns(tlr.Namespace).Update(newTlr)
+		mergePatch := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"labels":      tlr.ObjectMeta.Labels,
+				"annotations": tlr.ObjectMeta.Annotations,
+			},
+		}
+		patch, err := json.Marshal(mergePatch)
+		if err != nil {
+			return err
+		}
+		_, err = c.PipelineClientSet.TektonV1beta1().TaskLoopRuns(tlr.Namespace).Patch(tlr.Name, types.MergePatchType, patch)
 		return err
 	}
 	return nil
@@ -322,14 +367,6 @@ func getTaskrunLabels(tlr *v1beta1.TaskLoopRun, iterationStr string) map[string]
 		labels[pipeline.GroupName+taskLoopIterationLabelKey] = iterationStr
 	}
 	return labels
-}
-
-func getTaskRunTimeout(tls *v1beta1.TaskLoopSpec) *metav1.Duration {
-	if tls.Task.Timeout != nil {
-		return tls.Task.Timeout
-	} else {
-		return &metav1.Duration{Duration: config.DefaultTimeoutMinutes * time.Minute}
-	}
 }
 
 func propagateTaskLoopLabelsAndAnnotations(tlr *v1beta1.TaskLoopRun, taskLoopMeta *metav1.ObjectMeta) {
