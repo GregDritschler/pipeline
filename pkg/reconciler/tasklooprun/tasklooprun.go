@@ -94,7 +94,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 
 	if tlr.IsDone() {
 		logger.Infof("TaskLoopRun %s/%s is done", tlr.Namespace, tlr.Name)
-		// TODO: metrics (metrics.DurationAndCount)
+		// TODO: metrics (metrics.DurationAndCount) -- this might not be right place (double counting)
 		return nil
 	}
 

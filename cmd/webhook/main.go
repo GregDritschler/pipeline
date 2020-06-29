@@ -58,6 +58,7 @@ var types = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 	v1beta1.SchemeGroupVersion.WithKind("ClusterTask"): &v1beta1.ClusterTask{},
 	v1beta1.SchemeGroupVersion.WithKind("TaskRun"):     &v1beta1.TaskRun{},
 	v1beta1.SchemeGroupVersion.WithKind("PipelineRun"): &v1beta1.PipelineRun{},
+	v1beta1.SchemeGroupVersion.WithKind("TaskLoop"):    &v1beta1.TaskLoop{},
 }
 
 func newDefaultingAdmissionController(ctx context.Context, cmw configmap.Watcher) *controller.Impl {
