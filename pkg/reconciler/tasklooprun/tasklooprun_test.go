@@ -208,9 +208,19 @@ var basicTaskLoopRun = &v1beta1.TaskLoopRun{
 	},
 }
 
+var badTaskLoopRunTaskLoopNotFound = &v1beta1.TaskLoopRun{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:      "bad-tasklooprun-taskloop-not-found",
+		Namespace: "foo",
+	},
+	Spec: v1beta1.TaskLoopRunSpec{
+		TaskLoopRef: &v1beta1.TaskLoopRef{Name: "no-such-taskloop"},
+	},
+}
+
 var badTaskLoopRunInvalidTimeoutParameter = &v1beta1.TaskLoopRun{
 	ObjectMeta: metav1.ObjectMeta{
-		Name:      "bad-tasklooprun",
+		Name:      "bad-tasklooprun-invalid-timeout",
 		Namespace: "foo",
 	},
 	Spec: v1beta1.TaskLoopRunSpec{
@@ -220,6 +230,26 @@ var badTaskLoopRunInvalidTimeoutParameter = &v1beta1.TaskLoopRun{
 		}, {
 			Name:  "timeout-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "junk"},
+		}, {
+			Name:  "additional-parameter",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
+		}},
+		TaskLoopRef: &v1beta1.TaskLoopRef{Name: "basic-taskloop"},
+	},
+}
+
+var badTaskLoopRunNegativeTimeoutParameter = &v1beta1.TaskLoopRun{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:      "bad-tasklooprun-negative-timeout",
+		Namespace: "foo",
+	},
+	Spec: v1beta1.TaskLoopRunSpec{
+		Params: []v1beta1.Param{{
+			Name:  "withItems-parameter",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
+		}, {
+			Name:  "timeout-parameter",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "-30s"},
 		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
@@ -552,6 +582,14 @@ func TestReconcileTaskLoopRunFailures(t *testing.T) {
 		reason     v1beta1.TaskLoopRunReason
 		wantEvents []string
 	}{{
+		name:   "TaskLoop not found",
+		tlr:    badTaskLoopRunTaskLoopNotFound,
+		reason: v1beta1.TaskLoopRunReasonCouldntGetTaskLoop,
+		wantEvents: []string{
+			"Normal Started ",
+			"Warning Failed Error retrieving TaskLoop",
+		},
+	}, {
 		name:   "invalid timeout",
 		tlr:    badTaskLoopRunInvalidTimeoutParameter,
 		reason: v1beta1.TaskLoopRunReasonFailedValidation,
@@ -559,11 +597,20 @@ func TestReconcileTaskLoopRunFailures(t *testing.T) {
 			"Normal Started ",
 			"Warning Failed The timeout value in TaskLoop foo/basic-taskloop is not valid",
 		},
+	}, {
+		name:   "negative timeout",
+		tlr:    badTaskLoopRunNegativeTimeoutParameter,
+		reason: v1beta1.TaskLoopRunReasonFailedValidation,
+		wantEvents: []string{
+			"Normal Started ",
+			"Warning Failed The timeout value in TaskLoop foo/basic-taskloop is negative",
+		},
 	}}
 
 	d := test.Data{
-		TaskLoops:    []*v1beta1.TaskLoop{basicTaskLoop},
-		TaskLoopRuns: []*v1beta1.TaskLoopRun{badTaskLoopRunInvalidTimeoutParameter},
+		TaskLoops: []*v1beta1.TaskLoop{basicTaskLoop},
+		TaskLoopRuns: []*v1beta1.TaskLoopRun{
+			badTaskLoopRunTaskLoopNotFound, badTaskLoopRunInvalidTimeoutParameter, badTaskLoopRunNegativeTimeoutParameter},
 	}
 
 	for _, tc := range testcases {
