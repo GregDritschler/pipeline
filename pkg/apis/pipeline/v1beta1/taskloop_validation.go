@@ -58,8 +58,12 @@ func (tls *TaskLoopSpec) Validate(ctx context.Context) *apis.FieldError {
 	}
 	// Validate timeout field value if it is not parameterized in any way.
 	if tls.Task.Timeout != "" && !strings.Contains(tls.Task.Timeout, "$(params") {
-		if _, err := time.ParseDuration(tls.Task.Timeout); err != nil {
+		duration, err := time.ParseDuration(tls.Task.Timeout)
+		if err != nil {
 			return apis.ErrInvalidValue(err.Error(), "spec.task.timeout")
+		}
+		if duration < 0 {
+			return apis.ErrInvalidValue("the timeout value is negative", "spec.task.timeout")
 		}
 	}
 	return nil

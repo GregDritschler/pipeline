@@ -372,6 +372,22 @@ func TestTaskLoop_Validate_Error(t *testing.T) {
 			Paths:   []string{"spec.task.timeout"},
 		},
 	}, {
+		name: "literal timeout is negative",
+		tl: &v1beta1.TaskLoop{
+			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
+			Spec: v1beta1.TaskLoopSpec{
+				WithItems: []string{"item1"},
+				Task: v1beta1.TaskLoopTask{
+					TaskRef: &v1beta1.TaskRef{Name: "mytask"},
+					Timeout: "-1m",
+				},
+			},
+		},
+		expectedError: apis.FieldError{
+			Message: "invalid value: the timeout value is negative",
+			Paths:   []string{"spec.task.timeout"},
+		},
+	}, {
 		name: "timeout in undeclared parameter",
 		tl: &v1beta1.TaskLoop{
 			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
