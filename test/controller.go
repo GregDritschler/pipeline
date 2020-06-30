@@ -34,6 +34,8 @@ import (
 	fakepipelineinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/pipeline/fake"
 	fakepipelineruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/pipelinerun/fake"
 	faketaskinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/task/fake"
+	faketaskloopinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/taskloop/fake"
+	faketaskloopruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/tasklooprun/fake"
 	faketaskruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/taskrun/fake"
 	fakeresourceclientset "github.com/tektoncd/pipeline/pkg/client/resource/clientset/versioned/fake"
 	resourceinformersv1alpha1 "github.com/tektoncd/pipeline/pkg/client/resource/informers/externalversions/resource/v1alpha1"
@@ -69,6 +71,8 @@ type Data struct {
 	Pods              []*corev1.Pod
 	Namespaces        []*corev1.Namespace
 	ConfigMaps        []*corev1.ConfigMap
+	TaskLoopRuns      []*v1beta1.TaskLoopRun
+	TaskLoops         []*v1beta1.TaskLoop
 }
 
 // Clients holds references to clients which are useful for reconciler tests.
@@ -90,6 +94,8 @@ type Informers struct {
 	Condition        informersv1alpha1.ConditionInformer
 	Pod              coreinformers.PodInformer
 	ConfigMap        coreinformers.ConfigMapInformer
+	TaskLoopRun      informersv1beta1.TaskLoopRunInformer
+	TaskLoop         informersv1beta1.TaskLoopInformer
 }
 
 // Assets holds references to the controller, logs, clients, and informers.
@@ -167,6 +173,8 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 		Condition:        fakeconditioninformer.Get(ctx),
 		Pod:              fakepodinformer.Get(ctx),
 		ConfigMap:        fakeconfigmapinformer.Get(ctx),
+		TaskLoopRun:      faketaskloopruninformer.Get(ctx),
+		TaskLoop:         faketaskloopinformer.Get(ctx),
 	}
 
 	// Attach reactors that add resource mutations to the appropriate
@@ -238,6 +246,20 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 	for _, cm := range d.ConfigMaps {
 		cm := cm.DeepCopy() // Avoid assumptions that the informer's copy is modified.
 		if _, err := c.Kube.CoreV1().ConfigMaps(cm.Namespace).Create(cm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Pipeline.PrependReactor("*", "taskloopruns", AddToInformer(t, i.TaskLoopRun.Informer().GetIndexer()))
+	for _, tlr := range d.TaskLoopRuns {
+		tlr := tlr.DeepCopy() // Avoid assumptions that the informer's copy is modified.
+		if _, err := c.Pipeline.TektonV1beta1().TaskLoopRuns(tlr.Namespace).Create(tlr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Pipeline.PrependReactor("*", "taskloops", AddToInformer(t, i.TaskLoop.Informer().GetIndexer()))
+	for _, tl := range d.TaskLoops {
+		tl := tl.DeepCopy() // Avoid assumptions that the informer's copy is modified.
+		if _, err := c.Pipeline.TektonV1beta1().TaskLoops(tl.Namespace).Create(tl); err != nil {
 			t.Fatal(err)
 		}
 	}
