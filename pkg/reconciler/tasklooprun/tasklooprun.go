@@ -302,8 +302,7 @@ func (c *Reconciler) updateTaskrunStatus(logger *zap.SugaredLogger, tlr *v1beta1
 	taskRunLabels := getTaskrunLabels(tlr, "")
 	taskRuns, err := c.taskRunLister.TaskRuns(tlr.Namespace).List(labels.SelectorFromSet(taskRunLabels))
 	if err != nil {
-		logger.Errorf("could not list TaskRuns %#v", err)
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("could not list TaskRuns %#v", err)
 	}
 	if taskRuns == nil || len(taskRuns) == 0 {
 		return 0, nil, nil
@@ -313,8 +312,8 @@ func (c *Reconciler) updateTaskrunStatus(logger *zap.SugaredLogger, tlr *v1beta1
 		iterationStr := lbls[pipeline.GroupName+taskLoopIterationLabelKey]
 		iteration, err := strconv.Atoi(iterationStr)
 		if err != nil {
-			logger.Errorf("Error converting iteration number in TaskRun %s:  %#v", tr.Name, err)
-			// TODO: Fail the tasklooprun?
+			// TODO: As it stands this error will cause reconcile to be retried. Should it be? Or should the run fail? Need hard vs soft error.
+			return 0, nil, fmt.Errorf("Error converting iteration number in TaskRun %s:  %#v", tr.Name, err)
 		}
 		tlr.Status.TaskRuns[tr.Name] = &v1beta1.TaskLoopTaskRunStatus{
 			Iteration: iteration,
