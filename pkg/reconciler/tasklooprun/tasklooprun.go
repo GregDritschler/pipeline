@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"time"
 
+	jsonpatch "gomodules.xyz/jsonpatch/v2"
+
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	clientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
@@ -33,6 +35,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	"github.com/tektoncd/pipeline/pkg/reconciler/tasklooprun/resources"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -98,12 +101,6 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 		return nil
 	}
 
-	if tlr.IsCancelled() {
-		logger.Infof("TaskLoopRun %s/%s is cancelled", tlr.Namespace, tlr.Name)
-		// TODO: Implement cancel (cascade it to child taskruns)
-		return nil
-	}
-
 	// Store the condition before reconcile
 	beforeCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
 
@@ -158,17 +155,51 @@ func (c *Reconciler) reconcile(ctx context.Context, tlr *v1beta1.TaskLoopRun) er
 
 	// Check the status of the TaskRun for the highest iteration.
 	if highestIterationTr != nil {
-		// If it's not done, wait for it to finish.
+		// If it's not done, wait for it to finish or cancel it if the run is cancelled.
 		if !highestIterationTr.IsDone() {
+			if tlr.IsCancelled() {
+				logger.Infof("TaskLoopRun %s/%s is cancelled.  Cancelling TaskRun %s.", tlr.Namespace, tlr.Name, highestIterationTr.Name)
+				b, err := getCancelPatch()
+				if err != nil {
+					return fmt.Errorf("Failed to make patch to cancel TaskRun %s: %v", highestIterationTr.Name, err)
+				}
+				if _, err := c.PipelineClientSet.TektonV1beta1().TaskRuns(tlr.Namespace).Patch(highestIterationTr.Name, types.JSONPatchType, b, ""); err != nil {
+					tlr.Status.MarkRunning(v1beta1.TaskLoopRunReasonCouldntCancel.String(),
+						"Failed to patch TaskRun `%s` with cancellation: %s: %v", highestIterationTr.Name, err)
+					return nil
+				}
+				// Update status. It is still running until the TaskRun is actually cancelled.
+				tlr.Status.MarkRunning(v1beta1.TaskLoopRunReasonRunning.String(),
+					"Cancelling TaskRun %s", highestIterationTr.Name)
+				return nil
+			}
 			tlr.Status.MarkRunning(v1beta1.TaskLoopRunReasonRunning.String(),
 				"Iterations completed: %d", highestIteration-1)
 			return nil
 		}
-		// If it failed, then the TaskLoopRun has failed as well.
+		// If it failed, then retry the task if possible.  Otherwise fail the TaskLoopRun.
 		if !highestIterationTr.IsSuccessful() {
-			tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonFailed.String(),
-				"TaskRun %s has failed",
-				highestIterationTr.Name)
+			if tlr.IsCancelled() {
+				tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonCancelled.String(),
+					"TaskLoopRun %s/%s was cancelled",
+					tlr.Namespace, tlr.Name)
+			} else {
+				retriesDone := len(highestIterationTr.Status.RetriesStatus)
+				retries := taskLoopSpec.Task.Retries
+				if retriesDone < retries {
+					highestIterationTr, err = c.retryTaskRun(highestIterationTr)
+					if err != nil {
+						return fmt.Errorf("error retrying TaskRun %s from TaskLoopRun %s: %w", highestIterationTr.Name, tlr.Name, err)
+					}
+					tlr.Status.TaskRuns[highestIterationTr.Name] = &v1beta1.TaskLoopTaskRunStatus{
+						Iteration: highestIteration,
+						Status:    &highestIterationTr.Status,
+					}
+				} else {
+					tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonFailed.String(),
+						"TaskRun %s has failed", highestIterationTr.Name)
+				}
+			}
 			return nil
 		}
 	}
@@ -208,6 +239,14 @@ func (c *Reconciler) reconcile(ctx context.Context, tlr *v1beta1.TaskLoopRun) er
 	if nextIteration > len(taskLoopSpec.WithItems) {
 		tlr.Status.MarkSucceeded(v1beta1.TaskLoopRunReasonSucceeded.String(),
 			"All TaskRuns completed successfully")
+		return nil
+	}
+
+	// Before starting up another TaskRun, check if the run was cancelled.
+	if tlr.IsCancelled() {
+		tlr.Status.MarkFailed(v1beta1.TaskLoopRunReasonCancelled.String(),
+			"TaskLoopRun %s/%s was cancelled",
+			tlr.Namespace, tlr.Name)
 		return nil
 	}
 
@@ -291,8 +330,6 @@ func (c *Reconciler) updateTaskrunStatus(logger *zap.SugaredLogger, tlr *v1beta1
 
 func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tl *v1beta1.TaskLoopSpec, tlr *v1beta1.TaskLoopRun, iteration int, timeout *metav1.Duration) (*v1beta1.TaskRun, error) {
 
-	// TODO: Investigate how task retries will be implemented.
-
 	// Create name for TaskRun from TaskLoopRun name plus iteration number.
 	trName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix(fmt.Sprintf("%s-%s", tlr.Name, fmt.Sprintf("%05d", iteration)))
 
@@ -325,6 +362,20 @@ func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tl *v1beta1.TaskLo
 
 }
 
+func (c *Reconciler) retryTaskRun(tr *v1beta1.TaskRun) (*v1beta1.TaskRun, error) {
+	newStatus := *tr.Status.DeepCopy()
+	newStatus.RetriesStatus = nil
+	tr.Status.RetriesStatus = append(tr.Status.RetriesStatus, newStatus)
+	tr.Status.StartTime = nil
+	tr.Status.CompletionTime = nil
+	tr.Status.PodName = ""
+	tr.Status.SetCondition(&apis.Condition{
+		Type:   apis.ConditionSucceeded,
+		Status: corev1.ConditionUnknown,
+	})
+	return c.PipelineClientSet.TektonV1beta1().TaskRuns(tr.Namespace).UpdateStatus(tr)
+}
+
 func (c *Reconciler) updateLabelsAndAnnotations(tlr *v1beta1.TaskLoopRun) error {
 	newTlr, err := c.taskLoopRunLister.TaskLoopRuns(tlr.Namespace).Get(tlr.Name)
 	if err != nil {
@@ -345,6 +396,19 @@ func (c *Reconciler) updateLabelsAndAnnotations(tlr *v1beta1.TaskLoopRun) error 
 		return err
 	}
 	return nil
+}
+
+func getCancelPatch() ([]byte, error) {
+	patches := []jsonpatch.JsonPatchOperation{{
+		Operation: "add",
+		Path:      "/spec/status",
+		Value:     v1beta1.TaskRunSpecStatusCancelled,
+	}}
+	patchBytes, err := json.Marshal(patches)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal patch bytes in order to cancel: %v", err)
+	}
+	return patchBytes, nil
 }
 
 func getTaskrunAnnotations(tlr *v1beta1.TaskLoopRun) map[string]string {

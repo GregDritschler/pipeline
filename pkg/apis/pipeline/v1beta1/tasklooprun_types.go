@@ -111,6 +111,13 @@ const (
 	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the TaskLoopRun completed successfully
 	TaskLoopRunReasonSucceeded TaskLoopRunReason = "Succeeded"
 
+	// TaskLoopRunReasonCancelled indicates that a TaskLoopRunRun was cancelled.
+	TaskLoopRunReasonCancelled TaskLoopRunReason = "TaskLoopRunCancelled"
+
+	// TaskLoopRunReasonCouldntCancel indicates that a TaskLoopRun was cancelled but attempting to update
+	// the running TaskRun as cancelled failed.
+	TaskLoopRunReasonCouldntCancel TaskLoopRunReason = "TaskLoopRunCouldntCancel"
+
 	// TaskLoopRunReasonCouldntGetTaskLoop indicates that the associated TaskLoop couldn't be retrieved
 	TaskLoopRunReasonCouldntGetTaskLoop TaskLoopRunReason = "CouldntGetTaskLoop"
 
