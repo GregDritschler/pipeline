@@ -24,6 +24,7 @@ import (
 
 	"github.com/tektoncd/pipeline/pkg/apis/validate"
 	"github.com/tektoncd/pipeline/pkg/substitution"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
 )
@@ -95,17 +96,17 @@ func validateTask(ctx context.Context, tls *TaskLoopSpec) *apis.FieldError {
 
 func validateTaskLoopVariables(tls *TaskLoopSpec) *apis.FieldError {
 	const prefix = "params"
-	parameterNames := map[string]struct{}{}
-	arrayParameterNames := map[string]struct{}{}
+	parameterNames := sets.NewString()
+	arrayParameterNames := sets.NewString()
 
 	// Gather declared parameter names.
 	for _, p := range tls.Params {
-		if _, ok := parameterNames[p.Name]; ok {
+		if parameterNames.Has(p.Name) {
 			return apis.ErrGeneric("parameter is declared more than once", fmt.Sprintf("spec.params.%s", p.Name))
 		}
-		parameterNames[p.Name] = struct{}{}
+		parameterNames.Insert(p.Name)
 		if p.Type == ParamTypeArray {
-			arrayParameterNames[p.Name] = struct{}{}
+			arrayParameterNames.Insert(p.Name)
 		}
 	}
 
@@ -128,12 +129,12 @@ func validateTaskLoopVariables(tls *TaskLoopSpec) *apis.FieldError {
 	}
 
 	// Validate parameter references within parameter bindings
-	parameterBindings := map[string]struct{}{}
+	parameterBindings := sets.NewString()
 	for _, param := range tls.Task.Params {
-		if _, ok := parameterBindings[param.Name]; ok {
+		if parameterBindings.Has(param.Name) {
 			return apis.ErrGeneric("task parameter appears more than once", fmt.Sprintf("spec.task.params.%s", param.Name))
 		}
-		parameterBindings[param.Name] = struct{}{}
+		parameterBindings.Insert(param.Name)
 		if param.Value.Type == ParamTypeString {
 			if err := substitution.ValidateVariable(fmt.Sprintf("param[%s]", param.Name), param.Value.StringVal, prefix, "task parameter", "spec.task", parameterNames); err != nil {
 				return err
