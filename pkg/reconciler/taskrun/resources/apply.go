@@ -96,6 +96,18 @@ func ApplyResources(spec *v1beta1.TaskSpec, resolvedResources map[string]v1beta1
 	return ApplyReplacements(spec, replacements, map[string][]string{})
 }
 
+// ApplyContexts applies the substitution from $(context.(taskRun|task).*) with the specified values.
+// Currently supports only name substitution. Uses "" as a default if name is not specified.
+func ApplyContexts(spec *v1beta1.TaskSpec, rtr *ResolvedTaskResources, tr *v1beta1.TaskRun) *v1beta1.TaskSpec {
+	stringReplacements := map[string]string{}
+	stringReplacements["context.taskRun.name"] = tr.Name
+	stringReplacements["context.task.name"] = rtr.TaskName
+
+	return ApplyReplacements(spec,
+		map[string]string{"context.taskRun.name": tr.Name, "context.task.name": rtr.TaskName},
+		map[string][]string{})
+}
+
 // ApplyWorkspaces applies the substitution from paths that the workspaces in w are mounted to, the
 // volumes that wb are realized with in the task spec ts and the PersistentVolumeClaim names for the
 // workspaces.
@@ -130,8 +142,8 @@ func ApplyTaskResults(spec *v1beta1.TaskSpec) *v1beta1.TaskSpec {
 	return ApplyReplacements(spec, stringReplacements, map[string][]string{})
 }
 
-// ApplyCredentialsPath applies a substitution of the key $(credentials.path) with the path that the creds-init
-// helper will write its credentials to.
+// ApplyCredentialsPath applies a substitution of the key $(credentials.path) with the path that credentials
+// from annotated secrets are written to.
 func ApplyCredentialsPath(spec *v1beta1.TaskSpec, path string) *v1beta1.TaskSpec {
 	stringReplacements := map[string]string{
 		"credentials.path": path,
@@ -176,6 +188,16 @@ func ApplyReplacements(spec *v1beta1.TaskSpec, stringReplacements map[string]str
 				}
 				if s.ServiceAccountToken != nil {
 					s.ServiceAccountToken.Audience = substitution.ApplyReplacements(s.ServiceAccountToken.Audience, stringReplacements)
+				}
+			}
+		}
+		if v.CSI != nil {
+			if v.CSI.NodePublishSecretRef != nil {
+				spec.Volumes[i].CSI.NodePublishSecretRef.Name = substitution.ApplyReplacements(v.CSI.NodePublishSecretRef.Name, stringReplacements)
+			}
+			if v.CSI.VolumeAttributes != nil {
+				for key, value := range v.CSI.VolumeAttributes {
+					spec.Volumes[i].CSI.VolumeAttributes[key] = substitution.ApplyReplacements(value, stringReplacements)
 				}
 			}
 		}

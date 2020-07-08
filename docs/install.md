@@ -21,12 +21,12 @@ This guide explains how to install Tekton Pipelines. It covers the following top
    * **[`HEAD`]** - this is the bleeding edge. It contains unreleased code that may result
      in unpredictable behavior. To get started, see the [development guide](https://github.com/tektoncd/pipeline/blob/master/DEVELOPMENT.md) instead of this page.
 
-2. If you don't have an existing Kubernetes cluster, set one up, version 1.15 or later:
+2. If you don't have an existing Kubernetes cluster, set one up, version 1.16 or later:
 
    ```bash
    #Example command for creating a cluster on GKE
    gcloud container clusters create $CLUSTER_NAME \
-     --zone=$CLUSTER_ZONE --cluster-version=1.15.11-gke.5
+     --zone=$CLUSTER_ZONE --cluster-version=1.16.9-gke.6
    ```
 
 3. Grant `cluster-admin` permissions to the current user:
@@ -235,6 +235,25 @@ data:
   bucket.service.account.field.name: GOOGLE_APPLICATION_CREDENTIALS
 ```
 
+## Configuring CloudEvents notifications
+
+When configured so, Tekton can generate `CloudEvents` for `TaskRun` and `PipelineRun` lifecycle
+events. The only configuration parameter is the URL of the sink. When not set, no notification is
+generared.
+
+```
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  default-cloud-events-sink: https://my-sink-url
+```
+
 ## Customizing basic execution parameters
 
 You can specify your own values that replace the default service account (`ServiceAccount`), timeout (`Timeout`), and Pod template (`PodTemplate`) values used by Tekton Pipelines in `TaskRun` and `PipelineRun` definitions. To do so, modify the ConfigMap `config-defaults` with your desired values.
@@ -268,7 +287,7 @@ file lists the keys you can customize along with their default values.
 
 To customize the behavior of the Pipelines Controller, modify the ConfigMap `feature-flags` as follows:
 
-- `disable-affinity-assistant` - set this flag to disable the [Affinity Assistant](./workspaces.md#affinity-assistant-and-specifying-workspace-order-in-a-pipeline)
+- `disable-affinity-assistant` - set this flag to `true` to disable the [Affinity Assistant](./workspaces.md#specifying-workspace-order-in-a-pipeline-and-affinity-assistants)
   that is used to provide Node Affinity for `TaskRun` pods that share workspace volume. 
   The Affinity Assistant is incompatible with other affinity rules
   configured for `TaskRun` pods.

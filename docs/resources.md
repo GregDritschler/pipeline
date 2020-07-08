@@ -330,7 +330,7 @@ Params that can be added are the following:
     is used. [git checkout][git-checkout] is used to switch to the
     revision, and will result in a detached HEAD in most cases. Use refspec
     along with revision if you want to checkout a particular branch without a
-    detached HEAD. _If no revision is specified, the resource will default to `master`._
+    detached HEAD. _If no revision is specified, the resource inspects remote repository to determine the correct default branch._
 1.  `refspec`: (Optional) specify a git [refspec][git-refspec] to pass to git-fetch.
      Note that if this field is specified, it must specify all refs, branches, tags,
      or commits required to checkout the specified `revision`. An additional fetch
@@ -506,7 +506,10 @@ References (head and base) describe Git references. They are represented as a
 set of json files.
 
 Comments describe a pull request comment. They are represented as a set of json
-files.
+files. Add a file or modify the `Body` field in an existing json comment file to
+interact with the PR. Files with json extension will be parsed as such.
+The content of any comments file(s) with other/no extensions will be treated as
+body field of the comment.
 
 Other pull request information can be found in `pr.json`. This is a read-only
 resource. Users should use other subresources (labels, comments, etc) to
