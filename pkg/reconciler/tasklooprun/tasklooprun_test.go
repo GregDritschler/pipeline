@@ -537,7 +537,7 @@ func TestReconcileTaskLoopRun(t *testing.T) {
 		taskloop *v1beta1.TaskLoop
 		run      *v1beta1.TaskLoopRun
 		taskruns []*v1beta1.TaskRun
-		// The following set of fields described the expected state after reconcile.
+		// The following set of fields describe the expected state after reconcile.
 		expectedStatus   corev1.ConditionStatus
 		expectedReason   v1beta1.TaskLoopRunReason
 		expectedTaskruns []*v1beta1.TaskRun

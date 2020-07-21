@@ -40,7 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/apis"
-	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 )
@@ -75,7 +74,6 @@ var (
 func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 	logger.Infof("Reconciling TaskLoopRun %s/%s at %v", tlr.Namespace, tlr.Name, time.Now())
-	recorder := controller.GetEventRecorder(ctx)
 
 	// If the TaskLoopRun has not started, initialize the Condition and set the start time.
 	if !tlr.IsStarted() {
@@ -92,7 +90,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 		// We also want to send the "Started" event as soon as possible for anyone who may be waiting
 		// on the event to perform user facing initialisations, such has reset a CI check status
 		afterCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
-		events.Emit(recorder, nil, afterCondition, tlr)
+		events.Emit(ctx, nil, afterCondition, tlr)
 	}
 
 	if tlr.IsDone() {
@@ -116,7 +114,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tlr *v1beta1.TaskLoopRun
 	}
 
 	afterCondition := tlr.Status.GetCondition(apis.ConditionSucceeded)
-	events.Emit(recorder, beforeCondition, afterCondition, tlr)
+	events.Emit(ctx, beforeCondition, afterCondition, tlr)
 
 	// TODO: Need to implement the multierror stuff?
 	return err
