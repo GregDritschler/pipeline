@@ -211,6 +211,21 @@ func getCRDYaml(cs *clients, ns string) ([]byte, error) {
 		printOrAdd(i)
 	}
 
+	tls, err := cs.TaskLoopClient.List(metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("could not get taskloops: %w", err)
+	}
+	for _, i := range tls.Items {
+		printOrAdd(i)
+	}
+	tlrs, err := cs.TaskLoopRunClient.List(metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("could not get taskloopruns: %w", err)
+	}
+	for _, i := range tlrs.Items {
+		printOrAdd(i)
+	}
+
 	pods, err := cs.KubeClient.Kube.CoreV1().Pods(ns).List(metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("could not get pods: %w", err)
