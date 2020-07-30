@@ -53,8 +53,8 @@ A `TaskRun` definition supports the following fields:
     object that provides custom credentials for executing the `TaskRun`.
   - [`params`](#specifying-parameters) - Specifies the desired execution parameters for the `Task`.
   - [`resources`](#specifying-resources) - Specifies the desired `PipelineResource` values.
-    -[`inputs`](#specifying-resources) - Specifies the input resources.
-    -[`outputs`](#specifying-resources) - Specifies the output resources.
+    - [`inputs`](#specifying-resources) - Specifies the input resources.
+    - [`outputs`](#specifying-resources) - Specifies the output resources.
   - [`timeout`](#configuring-the-failure-timeout) - Specifies the timeout before the `TaskRun` fails.
   - [`podTemplate`](#specifying-a-pod-template) - Specifies a [`Pod` template](podtemplates.md) to use as
     the starting point for configuring the `Pods` for the `Task`.
@@ -331,8 +331,12 @@ When a `TaskRun` changes status, [events](events.md#taskruns) are triggered acco
 ### Monitoring `Steps`
 
 If multiple `Steps` are defined in the `Task` invoked by the `TaskRun`, you can monitor their execution
-status in the `steps.results` field using the following command, where `<name>` is the name of the target
+status in the `status.steps` field using the following command, where `<name>` is the name of the target
 `TaskRun`:
+
+```bash
+kubectl get taskrun <name> -o yaml
+```
 
 The exact Task Spec used to instantiate the TaskRun is also included in the Status for full auditability.
 

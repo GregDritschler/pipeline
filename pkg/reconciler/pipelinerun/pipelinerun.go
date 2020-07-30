@@ -38,12 +38,13 @@ import (
 	listers "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1beta1"
 	resourcelisters "github.com/tektoncd/pipeline/pkg/client/resource/listers/resource/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/contexts"
-	"github.com/tektoncd/pipeline/pkg/reconciler"
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
+	"github.com/tektoncd/pipeline/pkg/reconciler/events/cloudevent"
 	"github.com/tektoncd/pipeline/pkg/reconciler/pipeline/dag"
 	"github.com/tektoncd/pipeline/pkg/reconciler/pipelinerun/resources"
 	"github.com/tektoncd/pipeline/pkg/reconciler/taskrun"
 	"github.com/tektoncd/pipeline/pkg/reconciler/volumeclaim"
+	"github.com/tektoncd/pipeline/pkg/timeout"
 	"github.com/tektoncd/pipeline/pkg/workspace"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -97,9 +98,6 @@ const (
 	// ReasonCouldntCancel indicates that a PipelineRun was cancelled but attempting to update
 	// all of the running TaskRuns as cancelled failed.
 	ReasonCouldntCancel = "PipelineRunCouldntCancel"
-
-	// pipelineRunAgentName defines logging agent name for PipelineRun Controller
-	pipelineRunAgentName = "pipeline-controller"
 )
 
 // Reconciler implements controller.Reconciler for Configuration resources.
@@ -116,8 +114,9 @@ type Reconciler struct {
 	clusterTaskLister listers.ClusterTaskLister
 	resourceLister    resourcelisters.PipelineResourceLister
 	conditionLister   listersv1alpha1.ConditionLister
+	cloudEventClient  cloudevent.CEClient
 	tracker           tracker.Interface
-	timeoutHandler    *reconciler.TimeoutSet
+	timeoutHandler    *timeout.Handler
 	metrics           *Recorder
 	pvcHandler        volumeclaim.PvcHandler
 }
@@ -127,11 +126,13 @@ var (
 	_ pipelinerunreconciler.Interface = (*Reconciler)(nil)
 )
 
-// Reconcile compares the actual state with the desired, and attempts to
+// ReconcileKind compares the actual state with the desired, and attempts to
 // converge the two. It then updates the Status block of the Pipeline Run
 // resource with the current status of the resource.
 func (c *Reconciler) ReconcileKind(ctx context.Context, pr *v1beta1.PipelineRun) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
+	ctx = cloudevent.ToContext(ctx, c.cloudEventClient)
+
 	// Read the initial condition
 	before := pr.Status.GetCondition(apis.ConditionSucceeded)
 
@@ -887,6 +888,8 @@ func updatePipelineRunStatusFromTaskRuns(logger *zap.SugaredLogger, prName strin
 		for taskRunName, pipelineRunTaskRunStatus := range prStatus.TaskRuns {
 			taskRunByPipelineTask[pipelineRunTaskRunStatus.PipelineTaskName] = taskRunName
 		}
+	} else {
+		prStatus.TaskRuns = make(map[string]*v1beta1.PipelineRunTaskRunStatus)
 	}
 	// Loop over all the TaskRuns associated to Tasks
 	for _, taskrun := range trs {

@@ -75,16 +75,16 @@ aggregates them into their respective files in `$HOME`.
 
 1. Then use that `ServiceAccount` in your `TaskRun` (in `run.yaml`):
 
-```yaml
-apiVersion: tekton.dev/v1beta1
-kind: TaskRun
-metadata:
-  name: build-push-task-run-2
-spec:
-  serviceAccountName: build-bot
-  taskRef:
-    name: build-push
-```
+   ```yaml
+   apiVersion: tekton.dev/v1beta1
+   kind: TaskRun
+   metadata:
+     name: build-push-task-run-2
+   spec:
+     serviceAccountName: build-bot
+     taskRef:
+       name: build-push
+   ```
 
 1. Or use that `ServiceAccount` in your `PipelineRun` (in `run.yaml`):
 
@@ -109,6 +109,27 @@ spec:
 When the `Run` executes, before steps execute, a `~/.ssh/config` will be
 generated containing the key configured in the `Secret`. This key is then used
 to authenticate when retrieving any `PipelineResources`.
+
+### Using a custom port for SSH authentication
+
+In order to interact with your git server over a custom SSH port you must
+specify the port as part of the Secret. Here's an example:
+
+```
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ssh-key-custom-port
+  annotations:
+    tekton.dev/git-0: example.com:2222
+type: kubernetes.io/ssh-auth
+data:
+  ssh-privatekey: <base64 encoded>
+  known_hosts: <base64 encoded>
+```
+
+Any PipelineResource referencing a repo at `example.com` will now connect
+to it over port 2222.
 
 ### Using SSH authentication in your own `git` `Tasks`
 
@@ -239,16 +260,16 @@ credentials are then used to authenticate when retrieving any
 
 1. Then use that `ServiceAccount` in your `TaskRun` (in `run.yaml`):
 
-```yaml
-apiVersion: tekton.dev/v1beta1
-kind: TaskRun
-metadata:
-  name: build-push-task-run-2
-spec:
-  serviceAccountName: build-bot
-  taskRef:
-    name: build-push
-```
+   ```yaml
+   apiVersion: tekton.dev/v1beta1
+   kind: TaskRun
+   metadata:
+     name: build-push-task-run-2
+   spec:
+     serviceAccountName: build-bot
+     taskRef:
+       name: build-push
+   ```
 
 1. Or use that `ServiceAccount` in your `PipelineRun` (in `run.yaml`):
 
@@ -408,7 +429,7 @@ For an example of using SSH credentials in a non-root `securityContext`, see the
 Given URLs, usernames, and passwords of the form: `https://url{n}.com`,
 `user{n}`, and `pass{n}`, generate the following for Docker:
 
-```json
+```
 === ~/.docker/config.json ===
 {
   "auths": {
