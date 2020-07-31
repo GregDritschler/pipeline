@@ -19,6 +19,7 @@ package tasklooprun
 import (
 	"context"
 
+	"github.com/tektoncd/pipeline/pkg/apis/config"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	pipelineclient "github.com/tektoncd/pipeline/pkg/client/injection/client"
@@ -26,7 +27,6 @@ import (
 	taskloopruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/tasklooprun"
 	taskruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/taskrun"
 	tasklooprunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1beta1/tasklooprun"
-	"github.com/tektoncd/pipeline/pkg/reconciler/pipelinerun/config"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
@@ -51,7 +51,7 @@ func NewController(namespace string, images pipeline.Images) func(context.Contex
 		}
 
 		impl := tasklooprunreconciler.NewImpl(ctx, c, func(impl *controller.Impl) controller.Options {
-			configStore := config.NewStore(images, logger.Named("config-store"))
+			configStore := config.NewStore(logger.Named("config-store"))
 			configStore.WatchConfigs(cmw)
 			return controller.Options{
 				AgentName:   v1beta1.TaskLoopRunKind,
