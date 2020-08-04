@@ -121,51 +121,56 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 			return merr.ErrorOrNil()
 		}
 		c.timeoutHandler.Release(tr)
-		pod, err := c.KubeClientSet.CoreV1().Pods(tr.Namespace).Get(tr.Status.PodName, metav1.GetOptions{})
-		if err == nil {
-			err = podconvert.StopSidecars(c.Images.NopImage, c.KubeClientSet, *pod)
+		if !tr.IsLoopingTaskRun() {
+			pod, err := c.KubeClientSet.CoreV1().Pods(tr.Namespace).Get(tr.Status.PodName, metav1.GetOptions{})
 			if err == nil {
-				// Check if any SidecarStatuses are still shown as Running after stopping
-				// Sidecars. If any Running, update SidecarStatuses based on Pod ContainerStatuses.
-				if podconvert.IsSidecarStatusRunning(tr) {
-					err = updateStoppedSidecarStatus(ctx, pod, tr, c)
+				err = podconvert.StopSidecars(c.Images.NopImage, c.KubeClientSet, *pod)
+				if err == nil {
+					// Check if any SidecarStatuses are still shown as Running after stopping
+					// Sidecars. If any Running, update SidecarStatuses based on Pod ContainerStatuses.
+					if podconvert.IsSidecarStatusRunning(tr) {
+						err = updateStoppedSidecarStatus(ctx, pod, tr, c)
+					}
 				}
+			} else if k8serrors.IsNotFound(err) {
+				return merr.ErrorOrNil()
 			}
-		} else if k8serrors.IsNotFound(err) {
-			return merr.ErrorOrNil()
-		}
-		if err != nil {
-			logger.Errorf("Error stopping sidecars for TaskRun %q: %v", tr.Name, err)
-			merr = multierror.Append(merr, err)
-		}
+			if err != nil {
+				logger.Errorf("Error stopping sidecars for TaskRun %q: %v", tr.Name, err)
+				merr = multierror.Append(merr, err)
+			}
 
-		go func(metrics *Recorder) {
-			err := metrics.DurationAndCount(tr)
-			if err != nil {
-				logger.Warnf("Failed to log the metrics : %v", err)
-			}
-			err = metrics.RecordPodLatency(pod, tr)
-			if err != nil {
-				logger.Warnf("Failed to log the metrics : %v", err)
-			}
-		}(c.metrics)
+			// TODO: Determine if parent TR should report metrics
+			go func(metrics *Recorder) {
+				err := metrics.DurationAndCount(tr)
+				if err != nil {
+					logger.Warnf("Failed to log the metrics : %v", err)
+				}
+				err = metrics.RecordPodLatency(pod, tr)
+				if err != nil {
+					logger.Warnf("Failed to log the metrics : %v", err)
+				}
+			}(c.metrics)
+		}
 
 		return merr.ErrorOrNil()
 	}
 
-	// If the TaskRun is cancelled, kill resources and update status
-	if tr.IsCancelled() {
-		message := fmt.Sprintf("TaskRun %q was cancelled", tr.Name)
-		err := c.failTaskRun(ctx, tr, v1beta1.TaskRunReasonCancelled, message)
-		return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)
-	}
+	if !tr.IsLoopingTaskRun() {
+		// If the TaskRun is cancelled, kill resources and update status
+		if tr.IsCancelled() {
+			message := fmt.Sprintf("TaskRun %q was cancelled", tr.Name)
+			err := c.failTaskRun(ctx, tr, v1beta1.TaskRunReasonCancelled, message)
+			return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)
+		}
 
-	// Check if the TaskRun has timed out; if it is, this will set its status
-	// accordingly.
-	if tr.HasTimedOut() {
-		message := fmt.Sprintf("TaskRun %q failed to finish within %q", tr.Name, tr.GetTimeout())
-		err := c.failTaskRun(ctx, tr, v1beta1.TaskRunReasonTimedOut, message)
-		return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)
+		// Check if the TaskRun has timed out; if it is, this will set its status
+		// accordingly.
+		if tr.HasTimedOut() {
+			message := fmt.Sprintf("TaskRun %q failed to finish within %q", tr.Name, tr.GetTimeout())
+			err := c.failTaskRun(ctx, tr, v1beta1.TaskRunReasonTimedOut, message)
+			return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)
+		}
 	}
 
 	// prepare fetches all required resources, validates them together with the
@@ -184,8 +189,14 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 
 	// Reconcile this copy of the task run and then write back any status
 	// updates regardless of whether the reconciliation errored out.
-	if err = c.reconcile(ctx, tr, taskSpec, rtr); err != nil {
-		logger.Errorf("Reconcile error: %v", err.Error())
+	if tr.IsLoopingTaskRun() {
+		if err = reconcileLoop(ctx, tr, c.PipelineClientSet, c.taskRunLister); err != nil {
+			logger.Errorf("Reconcile error: %v", err.Error())
+		}
+	} else {
+		if err = c.reconcile(ctx, tr, taskSpec, rtr); err != nil {
+			logger.Errorf("Reconcile error: %v", err.Error())
+		}
 	}
 	// Emit events (only when ConditionSucceeded was changed)
 	return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)

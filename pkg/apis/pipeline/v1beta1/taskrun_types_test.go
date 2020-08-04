@@ -374,3 +374,14 @@ func TestInitializeTaskRunConditions(t *testing.T) {
 		t.Fatalf("PipelineRun initialize reset the condition reason to %s", newCondition.Reason)
 	}
 }
+
+func TestIsLoopingTaskRun(t *testing.T) {
+	tr := &v1beta1.TaskRun{
+		Spec: v1beta1.TaskRunSpec{
+			WithItems: []string{"xyzzy"},
+		},
+	}
+	if !tr.IsLoopingTaskRun() {
+		t.Fatal("Expected IsLoopingTaskRun() to return true")
+	}
+}

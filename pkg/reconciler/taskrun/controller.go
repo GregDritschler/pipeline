@@ -96,6 +96,12 @@ func NewController(namespace string, images pipeline.Images) func(context.Contex
 			UpdateFunc: controller.PassNew(impl.Enqueue),
 		})
 
+		// Add event handler for child TaskRuns to notify parent.
+		taskRunInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+			FilterFunc: controller.FilterGroupKind(v1beta1.Kind("TaskRun")),
+			Handler:    controller.HandleAll(impl.EnqueueControllerOf),
+		})
+
 		c.tracker = tracker.New(impl.EnqueueKey, controller.GetTrackerLease(ctx))
 
 		podInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{

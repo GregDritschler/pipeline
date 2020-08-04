@@ -63,6 +63,9 @@ type TaskRunSpec struct {
 	// Workspaces is a list of WorkspaceBindings from volumes to workspaces.
 	// +optional
 	Workspaces []WorkspaceBinding `json:"workspaces,omitempty"`
+	// WithItems is an array of elements used to iterate the Task.
+	// +optional
+	WithItems []string `json:"withItems,omitempty"`
 }
 
 // TaskRunSpecStatus defines the taskrun spec status the user can provide
@@ -116,6 +119,9 @@ const (
 	TaskRunReasonCancelled TaskRunReason = "TaskRunCancelled"
 	// TaskRunReasonTimedOut is the reason set when the Taskrun has timed out
 	TaskRunReasonTimedOut TaskRunReason = "TaskRunTimeout"
+	// TaskRunReasonCouldntCancel indicates that a parent TaskRun was cancelled but attempting to update
+	// a child TaskRun as cancelled failed.
+	TaskRunReasonCouldntCancel TaskRunReason = "TaskRunCouldntCancel"
 )
 
 func (t TaskRunReason) String() string {
@@ -156,6 +162,11 @@ func (trs *TaskRunStatus) MarkResourceFailed(reason TaskRunReason, err error) {
 		Reason:  reason.String(),
 		Message: err.Error(),
 	})
+}
+
+// MarkResourceRunning sets the Succeeded condition to Unknown with the provided reason and message.
+func (trs *TaskRunStatus) MarkResourceRunning(reason, messageFormat string, messageA ...interface{}) {
+	taskRunCondSet.Manage(trs).MarkUnknown(apis.ConditionSucceeded, reason, messageFormat, messageA...)
 }
 
 // TaskRunStatusFields holds the fields of TaskRun's status.  This is defined
@@ -202,6 +213,10 @@ type TaskRunStatusFields struct {
 
 	// TaskSpec contains the Spec from the dereferenced Task definition used to instantiate this TaskRun.
 	TaskSpec *TaskSpec `json:"taskSpec,omitempty"`
+
+	// map of TaskLoopTaskRunStatus with the taskRun name as the key
+	// +optional
+	IterationStatus map[string]*TaskIterationStatus `json:"iterations,omitempty"`
 }
 
 // TaskRunResult used to describe the results of a task
@@ -268,6 +283,15 @@ type SidecarState struct {
 	Name                  string `json:"name,omitempty"`
 	ContainerName         string `json:"container,omitempty"`
 	ImageID               string `json:"imageID,omitempty"`
+}
+
+// TaskIterationStatus contains the status of a TaskRun that was executed within a loop.
+type TaskIterationStatus struct {
+	// iteration number
+	Iteration int `json:"iteration,omitempty"`
+	// Status is the TaskRunStatus for the corresponding TaskRun
+	// +optional
+	Status *TaskRunStatus `json:"status,omitempty"`
 }
 
 // CloudEventDelivery is the target of a cloud event along with the state of
@@ -440,4 +464,9 @@ func (tr *TaskRun) HasVolumeClaimTemplate() bool {
 		}
 	}
 	return false
+}
+
+// IsLoopingTaskRun returns true if this TaskRun represents the looping of a Task.
+func (tr *TaskRun) IsLoopingTaskRun() bool {
+	return tr.Spec.WithItems != nil
 }
