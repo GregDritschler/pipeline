@@ -650,6 +650,7 @@ func (c *Reconciler) createTaskRun(ctx context.Context, rprt *resources.Resolved
 			ServiceAccountName: serviceAccountName,
 			Timeout:            getTaskRunTimeout(pr, rprt),
 			PodTemplate:        podTemplate,
+			WithItems:          rprt.PipelineTask.WithItems,
 		}}
 
 	if rprt.ResolvedTaskResources.TaskName != "" {
@@ -893,6 +894,11 @@ func updatePipelineRunStatusFromTaskRuns(logger *zap.SugaredLogger, prName strin
 	}
 	// Loop over all the TaskRuns associated to Tasks
 	for _, taskrun := range trs {
+		// Only process TaskRuns that are owned by PipelineRun.
+		// This skips TaskRuns that are indirectly created by the PipelineRun (e.g. looping tasks).
+		if len(taskrun.OwnerReferences) > 0 && taskrun.OwnerReferences[0].Kind != "PipelineRun" {
+			continue
+		}
 		lbls := taskrun.GetLabels()
 		pipelineTaskName := lbls[pipeline.GroupName+pipeline.PipelineTaskLabelKey]
 		if _, ok := lbls[pipeline.GroupName+pipeline.ConditionCheckKey]; ok {

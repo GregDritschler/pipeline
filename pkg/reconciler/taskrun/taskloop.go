@@ -40,8 +40,8 @@ import (
 )
 
 const (
-	// parentTaskRunLabelKey is used as the label identifier in a child TaskRun for the parent TaskRun
-	parentTaskRunLabelKey = "/parentTaskRun"
+	// ParentTaskRunLabelKey is used as the label identifier in a child TaskRun for the parent TaskRun
+	ParentTaskRunLabelKey = "/parentTaskRun"
 
 	// taskLoopIterationLabelKey is used as the label identifier in a child TaskRun for the iteration number
 	taskLoopIterationLabelKey = "/taskLoopIteration"
@@ -119,7 +119,7 @@ func reconcileLoop(ctx context.Context, parentTr *v1beta1.TaskRun, pipelineClien
 			Type:    apis.ConditionSucceeded,
 			Status:  corev1.ConditionTrue,
 			Reason:  v1beta1.TaskRunReasonSuccessful.String(),
-			Message: "All TaskRuns completed successfully",
+			Message: "All iterations completed successfully",
 		})
 		parentTr.Status.CompletionTime = &metav1.Time{Time: time.Now()}
 		return nil
@@ -265,7 +265,7 @@ func getTaskRunLabels(tr *v1beta1.TaskRun, iterationStr string) map[string]strin
 	for key, val := range tr.ObjectMeta.Labels {
 		labels[key] = val
 	}
-	labels[pipeline.GroupName+parentTaskRunLabelKey] = tr.Name
+	labels[pipeline.GroupName+ParentTaskRunLabelKey] = tr.Name
 	if iterationStr != "" {
 		labels[pipeline.GroupName+taskLoopIterationLabelKey] = iterationStr
 	}

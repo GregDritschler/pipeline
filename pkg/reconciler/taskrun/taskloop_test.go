@@ -382,7 +382,7 @@ func TestReconcileLoopingTaskRun(t *testing.T) {
 		expectedParentStatus:  corev1.ConditionTrue,
 		expectedParentReason:  v1beta1.TaskRunReasonSuccessful,
 		expectedChildTaskRuns: []*v1beta1.TaskRun{successful(expectedTaskRunIteration1), successful(expectedTaskRunIteration2)},
-		expectedEvents:        []string{"Normal Succeeded All TaskRuns completed successfully"},
+		expectedEvents:        []string{"Normal Succeeded All iterations completed successfully"},
 	}, {
 		name:                  "Reconcile looping TaskRun after the first iteration failed",
 		task:                  aTask,

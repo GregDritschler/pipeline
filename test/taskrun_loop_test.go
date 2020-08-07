@@ -27,8 +27,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/pod"
+	"github.com/tektoncd/pipeline/pkg/reconciler/taskrun"
 	"github.com/tektoncd/pipeline/test/diff"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,10 +40,7 @@ import (
 )
 
 var (
-	startedEventMessage     = "" // TaskRun started event has no message
-	ignoreReleaseAnnotation = func(k string, v string) bool {
-		return k == pod.ReleaseAnnotation
-	}
+	taskrunStartedEventMessage = "" // TaskRun started event has no message
 )
 
 var aTask = &v1beta1.Task{
@@ -77,10 +76,10 @@ var runTaskLoopSuccess = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "run-taskloop",
 		Labels: map[string]string{
-			"myRunLabel": "myRunLabelValue",
+			"myTaskRunLabel": "myTaskRunLabelValue",
 		},
 		Annotations: map[string]string{
-			"myRunAnnotation": "myRunAnnotationValue",
+			"myTaskRunAnnotation": "myTaskRunAnnotationValue",
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
@@ -100,10 +99,10 @@ var runTaskLoopFailure = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "run-taskloop",
 		Labels: map[string]string{
-			"myRunLabel": "myRunLabelValue",
+			"myTaskRunLabel": "myTaskRunLabelValue",
 		},
 		Annotations: map[string]string{
-			"myRunAnnotation": "myRunAnnotationValue",
+			"myTaskRunAnnotation": "myTaskRunAnnotationValue",
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
@@ -128,12 +127,12 @@ var expectedTaskRunIteration1Success = &v1beta1.TaskRun{
 			"tekton.dev/parentTaskRun":     "run-taskloop",
 			"tekton.dev/task":              "a-task",
 			"tekton.dev/taskLoopIteration": "1",
-			"myRunLabel":                   "myRunLabelValue",
+			"myTaskRunLabel":               "myTaskRunLabelValue",
 			"myTaskLabel":                  "myTaskLabelValue",
 		},
 		Annotations: map[string]string{
-			"myRunAnnotation":  "myRunAnnotationValue",
-			"myTaskAnnotation": "myTaskAnnotationValue",
+			"myTaskRunAnnotation": "myTaskRunAnnotationValue",
+			"myTaskAnnotation":    "myTaskAnnotationValue",
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
@@ -167,12 +166,12 @@ var expectedTaskRunIteration2Success = &v1beta1.TaskRun{
 			"tekton.dev/parentTaskRun":     "run-taskloop",
 			"tekton.dev/task":              "a-task",
 			"tekton.dev/taskLoopIteration": "2",
-			"myRunLabel":                   "myRunLabelValue",
+			"myTaskRunLabel":               "myTaskRunLabelValue",
 			"myTaskLabel":                  "myTaskLabelValue",
 		},
 		Annotations: map[string]string{
-			"myRunAnnotation":  "myRunAnnotationValue",
-			"myTaskAnnotation": "myTaskAnnotationValue",
+			"myTaskRunAnnotation": "myTaskRunAnnotationValue",
+			"myTaskAnnotation":    "myTaskAnnotationValue",
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
@@ -206,12 +205,12 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 			"tekton.dev/parentTaskRun":     "run-taskloop",
 			"tekton.dev/task":              "a-task",
 			"tekton.dev/taskLoopIteration": "1",
-			"myRunLabel":                   "myRunLabelValue",
+			"myTaskRunLabel":               "myTaskRunLabelValue",
 			"myTaskLabel":                  "myTaskLabelValue",
 		},
 		Annotations: map[string]string{
-			"myRunAnnotation":  "myRunAnnotationValue",
-			"myTaskAnnotation": "myTaskAnnotationValue",
+			"myTaskRunAnnotation": "myTaskRunAnnotationValue",
+			"myTaskAnnotation":    "myTaskAnnotationValue",
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
@@ -236,7 +235,7 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 	},
 }
 
-func TestTaskLoopRun(t *testing.T) {
+func TestLoopingTaskRun(t *testing.T) {
 	t.Parallel()
 
 	testcases := []struct {
@@ -256,7 +255,7 @@ func TestTaskLoopRun(t *testing.T) {
 		expectedParentStatus:  corev1.ConditionTrue,
 		expectedParentReason:  v1beta1.TaskRunReasonSuccessful,
 		expectedChildTaskRuns: []*v1beta1.TaskRun{expectedTaskRunIteration1Success, expectedTaskRunIteration2Success},
-		expectedEvents:        []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
+		expectedEvents:        []string{taskrunStartedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All iterations completed successfully"},
 	}, {
 		name:                  "looping TaskRun fails",
 		task:                  aTask,
@@ -264,7 +263,7 @@ func TestTaskLoopRun(t *testing.T) {
 		expectedParentStatus:  corev1.ConditionFalse,
 		expectedParentReason:  v1beta1.TaskRunReasonFailed,
 		expectedChildTaskRuns: []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
-		expectedEvents:        []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
+		expectedEvents:        []string{taskrunStartedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
 	}}
 
 	for _, tc := range testcases {
@@ -331,20 +330,7 @@ func TestTaskLoopRun(t *testing.T) {
 						expectedTaskRun.Name, parentTaskRun.Namespace, parentTaskRun.Name)
 					continue
 				}
-				if d := cmp.Diff(expectedTaskRun.Spec, actualTaskRun.Spec); d != "" {
-					t.Errorf("Child TaskRun %s spec does not match expected spec. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
-				}
-				if d := cmp.Diff(expectedTaskRun.ObjectMeta.Annotations, actualTaskRun.ObjectMeta.Annotations,
-					cmpopts.IgnoreMapEntries(ignoreReleaseAnnotation)); d != "" {
-					t.Errorf("Child TaskRun %s does not have expected annotations. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
-				}
-				if d := cmp.Diff(expectedTaskRun.ObjectMeta.Labels, actualTaskRun.ObjectMeta.Labels); d != "" {
-					t.Errorf("Child TaskRun %s does not have expected labels. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
-				}
-				if d := cmp.Diff(expectedTaskRun.Status.Status.Conditions, actualTaskRun.Status.Status.Conditions,
-					cmpopts.IgnoreTypes(apis.Condition{}.Message, apis.Condition{}.LastTransitionTime)); d != "" {
-					t.Errorf("Child TaskRun %s does not have expected status condition. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
-				}
+				checkTaskRun(t, expectedTaskRun, &actualTaskRun)
 
 				// Check child TaskRun status in the parent TaskRun's status.
 				childTaskRunStatusInParentTaskRun, exists := parentTaskRun.Status.IterationStatus[actualTaskRun.Name]
@@ -379,6 +365,36 @@ func TestTaskLoopRun(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func checkTaskRun(t *testing.T, expectedTaskRun *v1beta1.TaskRun, actualTaskRun *v1beta1.TaskRun) {
+	if d := cmp.Diff(expectedTaskRun.Spec, actualTaskRun.Spec); d != "" {
+		t.Errorf("TaskRun %s spec does not match expected spec. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
+	}
+	ignoreReleaseAnnotation := func(k string, v string) bool {
+		return k == pod.ReleaseAnnotation
+	}
+	ignoreParentTaskRunLabel := func(k string, v string) bool {
+		return k == pipeline.GroupName+taskrun.ParentTaskRunLabelKey
+	}
+	if d := cmp.Diff(expectedTaskRun.ObjectMeta.Annotations, actualTaskRun.ObjectMeta.Annotations,
+		cmpopts.IgnoreMapEntries(ignoreReleaseAnnotation)); d != "" {
+		t.Errorf("TaskRun %s does not have expected annotations. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
+	}
+	if d := cmp.Diff(expectedTaskRun.ObjectMeta.Labels, actualTaskRun.ObjectMeta.Labels,
+		cmpopts.IgnoreMapEntries(ignoreParentTaskRunLabel)); d != "" {
+		t.Errorf("TaskRun %s does not have expected labels. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
+	}
+	// Check parentTaskRun label via regex (needed in pipelinerun test)
+	expectedParentLabel := expectedTaskRun.ObjectMeta.Labels[pipeline.GroupName+taskrun.ParentTaskRunLabelKey]
+	actualParentLabel := actualTaskRun.ObjectMeta.Labels[pipeline.GroupName+taskrun.ParentTaskRunLabelKey]
+	if matched, _ := regexp.MatchString(expectedParentLabel, actualParentLabel); !matched {
+		t.Errorf("TaskRun %s does not have expected parentTaskRun label %s.  It has %s", actualTaskRun.Name, expectedParentLabel, actualParentLabel)
+	}
+	if d := cmp.Diff(expectedTaskRun.Status.Status.Conditions, actualTaskRun.Status.Status.Conditions,
+		cmpopts.IgnoreTypes(apis.Condition{}.Message, apis.Condition{}.LastTransitionTime)); d != "" {
+		t.Errorf("TaskRun %s does not have expected status condition. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
 	}
 }
 

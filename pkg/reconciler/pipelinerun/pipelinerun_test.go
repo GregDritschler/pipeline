@@ -3628,6 +3628,79 @@ func TestReconcile_CloudEvents(t *testing.T) {
 	}
 }
 
+func TestReconcileWithTaskLooping(t *testing.T) {
+	names.TestingSeed()
+
+	ps := []*v1beta1.Pipeline{tb.Pipeline("pipeline-with-looping-task", tb.PipelineNamespace("foo"),
+		tb.PipelineSpec(
+			tb.PipelineParamSpec("testsToRun", v1beta1.ParamTypeArray),
+			tb.PipelineTask("runtests", "test-runner",
+				tb.PipelineTaskParam("testName", "$(item)"),
+			),
+		),
+	)}
+	// TODO: Support this in builder?
+	ps[0].Spec.Tasks[0].WithItems = []string{"$(params.testsToRun)"}
+
+	prs := []*v1beta1.PipelineRun{tb.PipelineRun("run-pipeline-with-looping-task", tb.PipelineRunNamespace("foo"),
+		tb.PipelineRunSpec("pipeline-with-looping-task",
+			tb.PipelineRunParam("testsToRun", "test1", "test2", "test3"),
+		),
+	)}
+
+	ts := []*v1beta1.Task{tb.Task("test-runner", tb.TaskNamespace("foo"),
+		tb.TaskSpec(
+			tb.TaskParam("testName", v1beta1.ParamTypeString),
+		),
+	)}
+
+	expected := tb.TaskRun("run-pipeline-with-looping-task-runtests-9l9zj", tb.TaskRunNamespace("foo"),
+		tb.TaskRunOwnerReference("PipelineRun", "run-pipeline-with-looping-task",
+			tb.OwnerReferenceAPIVersion("tekton.dev/v1beta1"),
+			tb.Controller, tb.BlockOwnerDeletion,
+		),
+		tb.TaskRunLabel("tekton.dev/pipeline", "pipeline-with-looping-task"),
+		tb.TaskRunLabel("tekton.dev/pipelineRun", "run-pipeline-with-looping-task"),
+		tb.TaskRunLabel(pipeline.GroupName+pipeline.PipelineTaskLabelKey, "runtests"),
+		tb.TaskRunSpec(
+			tb.TaskRunTaskRef("test-runner"),
+			tb.TaskRunParam("testName", "$(item)"),
+		),
+	)
+	// TODO: Support this in builder?
+	expected.Spec.WithItems = []string{"test1", "test2", "test3"}
+
+	d := test.Data{
+		PipelineRuns: prs,
+		Pipelines:    ps,
+		Tasks:        ts,
+	}
+	prt := NewPipelineRunTest(d, t)
+	defer prt.Cancel()
+
+	_, clients := prt.reconcileRun("foo", "run-pipeline-with-looping-task", []string{}, false)
+	actions := clients.Pipeline.Actions()
+
+	// Check that the expected TaskRun was created
+	var actual *v1beta1.TaskRun
+	for _, a := range actions {
+		if ca, ok := a.(ktesting.CreateAction); ok {
+			obj := ca.GetObject()
+			if actual, ok = obj.(*v1beta1.TaskRun); ok {
+				break
+			}
+		}
+	}
+
+	if actual == nil {
+		t.Errorf("Expected a TaskRun to be created but it wasn't.")
+	}
+
+	if d := cmp.Diff(actual, expected); d != "" {
+		t.Errorf("Actual TaskRun differs from expected TaskRun. Diff %s", diff.PrintWantGot(d))
+	}
+}
+
 // NewPipelineRunTest returns PipelineRunTest with a new PipelineRun controller created with specified state through data
 // This PipelineRunTest can be reused for multiple PipelineRuns by calling reconcileRun for each pipelineRun
 func NewPipelineRunTest(data test.Data, t *testing.T) *PipelineRunTest {

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	"github.com/tektoncd/pipeline/pkg/substitution"
 )
 
 // ApplyParameters applies the params from a PipelineRun.Params to a PipelineSpec.
@@ -95,7 +96,17 @@ func ApplyReplacements(p *v1beta1.PipelineSpec, replacements map[string]string, 
 	tasks := append(p.Tasks, p.Finally...)
 
 	for i := range tasks {
+		// Perform substitutions in task parameters
 		tasks[i].Params = replaceParamValues(tasks[i].Params, replacements, arrayReplacements)
+
+		// Perform substitutions in withItems
+		var newItems []string
+		for _, item := range tasks[i].WithItems {
+			newItems = append(newItems, substitution.ApplyArrayReplacements(item, replacements, arrayReplacements)...)
+		}
+		tasks[i].WithItems = newItems
+
+		// Perform substitutions in condition parameters
 		for j := range tasks[i].Conditions {
 			c := tasks[i].Conditions[j]
 			c.Params = replaceParamValues(c.Params, replacements, arrayReplacements)

@@ -137,6 +137,10 @@ type PipelineTask struct {
 	// Refer Go's ParseDuration documentation for expected format: https://golang.org/pkg/time/#ParseDuration
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	// WithItems is an array of elements used to iterate the Task.
+	// +optional
+	WithItems []string `json:"withItems,omitempty"`
 }
 
 func (pt PipelineTask) HashKey() string {
