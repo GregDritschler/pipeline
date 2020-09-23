@@ -41,7 +41,6 @@ import (
 	"github.com/tektoncd/pipeline/pkg/reconciler/events/cloudevent"
 	"github.com/tektoncd/pipeline/pkg/reconciler/taskrun/resources"
 	"github.com/tektoncd/pipeline/pkg/reconciler/volumeclaim"
-	"github.com/tektoncd/pipeline/pkg/termination"
 	"github.com/tektoncd/pipeline/pkg/timeout"
 	"github.com/tektoncd/pipeline/pkg/workspace"
 	corev1 "k8s.io/api/core/v1"
@@ -93,7 +92,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 		tr.Status.InitializeConditions()
 		// In case node time was not synchronized, when controller has been scheduled to other nodes.
 		if tr.Status.StartTime.Sub(tr.CreationTimestamp.Time) < 0 {
-			logger.Warnf("TaskRun %s createTimestamp %s is after the taskRun started %s", tr.GetRunKey(), tr.CreationTimestamp, tr.Status.StartTime)
+			logger.Warnf("TaskRun %s createTimestamp %s is after the taskRun started %s", tr.GetNamespacedName().String(), tr.CreationTimestamp, tr.Status.StartTime)
 			tr.Status.StartTime = &tr.CreationTimestamp
 		}
 		// Emit events. During the first reconcile the status of the TaskRun may change twice
@@ -120,7 +119,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 			// send cloud events. So we stop here an return errors encountered this far.
 			return merr.ErrorOrNil()
 		}
-		c.timeoutHandler.Release(tr)
+		c.timeoutHandler.Release(tr.GetNamespacedName())
 		pod, err := c.KubeClientSet.CoreV1().Pods(tr.Namespace).Get(tr.Status.PodName, metav1.GetOptions{})
 		if err == nil {
 			err = podconvert.StopSidecars(c.Images.NopImage, c.KubeClientSet, *pod)
@@ -145,6 +144,10 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 				logger.Warnf("Failed to log the metrics : %v", err)
 			}
 			err = metrics.RecordPodLatency(pod, tr)
+			if err != nil {
+				logger.Warnf("Failed to log the metrics : %v", err)
+			}
+			err = metrics.CloudEvents(tr)
 			if err != nil {
 				logger.Warnf("Failed to log the metrics : %v", err)
 			}
@@ -185,7 +188,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, tr *v1beta1.TaskRun) pkg
 	// Reconcile this copy of the task run and then write back any status
 	// updates regardless of whether the reconciliation errored out.
 	if err = c.reconcile(ctx, tr, taskSpec, rtr); err != nil {
-		logger.Errorf("Reconcile error: %v", err.Error())
+		logger.Errorf("Reconcile: %v", err.Error())
 	}
 	// Emit events (only when ConditionSucceeded was changed)
 	return c.finishReconcileUpdateEmitEvents(ctx, tr, before, err)
@@ -302,10 +305,12 @@ func (c *Reconciler) prepare(ctx context.Context, tr *v1beta1.TaskRun) (*v1beta1
 		return nil, nil, controller.NewPermanentError(err)
 	}
 
-	if err := validateWorkspaceCompatibilityWithAffinityAssistant(tr); err != nil {
-		logger.Errorf("TaskRun %q workspaces are invalid: %v", tr.Name, err)
-		tr.Status.MarkResourceFailed(podconvert.ReasonFailedValidation, err)
-		return nil, nil, controller.NewPermanentError(err)
+	if _, usesAssistant := tr.Annotations[workspace.AnnotationAffinityAssistantName]; usesAssistant {
+		if err := workspace.ValidateOnlyOnePVCIsUsed(tr.Spec.Workspaces); err != nil {
+			logger.Errorf("TaskRun %q workspaces incompatible with Affinity Assistant: %v", tr.Name, err)
+			tr.Status.MarkResourceFailed(podconvert.ReasonFailedValidation, err)
+			return nil, nil, controller.NewPermanentError(err)
+		}
 	}
 
 	// Initialize the cloud events if at least a CloudEventResource is defined
@@ -379,7 +384,7 @@ func (c *Reconciler) reconcile(ctx context.Context, tr *v1beta1.TaskRun,
 			logger.Errorf("Failed to create task run pod for taskrun %q: %v", tr.Name, newErr)
 			return newErr
 		}
-		go c.timeoutHandler.WaitTaskRun(tr, tr.Status.StartTime)
+		go c.timeoutHandler.Wait(tr.GetNamespacedName(), *tr.Status.StartTime, *tr.Spec.Timeout)
 	}
 	if err := c.tracker.Track(tr.GetBuildPodRef(), tr); err != nil {
 		logger.Errorf("Failed to create tracker for build pod %q for taskrun %q: %v", tr.Name, tr.Name, err)
@@ -397,9 +402,8 @@ func (c *Reconciler) reconcile(ctx context.Context, tr *v1beta1.TaskRun,
 	}
 
 	// Convert the Pod's status to the equivalent TaskRun Status.
-	tr.Status = podconvert.MakeTaskRunStatus(logger, *tr, pod, *taskSpec)
-
-	if err := updateTaskRunResourceResult(tr, *pod); err != nil {
+	tr.Status, err = podconvert.MakeTaskRunStatus(logger, *tr, pod, *taskSpec)
+	if err != nil {
 		return err
 	}
 
@@ -460,9 +464,9 @@ func (c *Reconciler) updateLabelsAndAnnotations(tr *v1beta1.TaskRun) (*v1beta1.T
 func (c *Reconciler) handlePodCreationError(ctx context.Context, tr *v1beta1.TaskRun, err error) error {
 	var msg string
 	if isExceededResourceQuotaError(err) {
-		backoff, currentlyBackingOff := c.timeoutHandler.GetBackoff(tr)
+		backoff, currentlyBackingOff := c.timeoutHandler.GetBackoff(tr.GetNamespacedName(), *tr.Status.StartTime, *tr.Spec.Timeout)
 		if !currentlyBackingOff {
-			go c.timeoutHandler.SetTaskRunTimer(tr, time.Until(backoff.NextAttempt))
+			go c.timeoutHandler.SetTimer(tr.GetNamespacedName(), time.Until(backoff.NextAttempt))
 		}
 		msg = fmt.Sprintf("TaskRun Pod exceeded available resources, reattempted %d times", backoff.NumAttempts)
 		tr.Status.SetCondition(&apis.Condition{
@@ -498,8 +502,9 @@ func (c *Reconciler) failTaskRun(ctx context.Context, tr *v1beta1.TaskRun, reaso
 	logger.Warn("stopping task run %q because of %q", tr.Name, reason)
 	tr.Status.MarkResourceFailed(reason, errors.New(message))
 
+	completionTime := metav1.Time{Time: time.Now()}
 	// update tr completed time
-	tr.Status.CompletionTime = &metav1.Time{Time: time.Now()}
+	tr.Status.CompletionTime = &completionTime
 
 	if tr.Status.PodName == "" {
 		logger.Warnf("task run %q has no pod running yet", tr.Name)
@@ -510,11 +515,36 @@ func (c *Reconciler) failTaskRun(ctx context.Context, tr *v1beta1.TaskRun, reaso
 	// can be reached, for example, by the pod never being schedulable due to limits imposed by
 	// a namespace's ResourceQuota.
 	err := c.KubeClientSet.CoreV1().Pods(tr.Namespace).Delete(tr.Status.PodName, &metav1.DeleteOptions{})
-
 	if err != nil && !k8serrors.IsNotFound(err) {
 		logger.Infof("Failed to terminate pod: %v", err)
 		return err
 	}
+
+	// Update step states for TaskRun on TaskRun object since pod has been deleted for cancel or timeout
+	for i, step := range tr.Status.Steps {
+		// If running, include StartedAt for when step began running
+		if step.Running != nil {
+			step.Terminated = &corev1.ContainerStateTerminated{
+				ExitCode:   1,
+				StartedAt:  step.Running.StartedAt,
+				FinishedAt: completionTime,
+				Reason:     reason.String(),
+			}
+			step.Running = nil
+			tr.Status.Steps[i] = step
+		}
+
+		if step.Waiting != nil {
+			step.Terminated = &corev1.ContainerStateTerminated{
+				ExitCode:   1,
+				FinishedAt: completionTime,
+				Reason:     reason.String(),
+			}
+			step.Waiting = nil
+			tr.Status.Steps[i] = step
+		}
+	}
+
 	return nil
 }
 
@@ -600,62 +630,6 @@ func (c *Reconciler) createPod(ctx context.Context, tr *v1beta1.TaskRun, rtr *re
 }
 
 type DeletePod func(podName string, options *metav1.DeleteOptions) error
-
-func updateTaskRunResourceResult(taskRun *v1beta1.TaskRun, pod corev1.Pod) error {
-	podconvert.SortContainerStatuses(&pod)
-
-	if taskRun.IsSuccessful() {
-		for idx, cs := range pod.Status.ContainerStatuses {
-			if cs.State.Terminated != nil {
-				msg := cs.State.Terminated.Message
-				r, err := termination.ParseMessage(msg)
-				if err != nil {
-					return fmt.Errorf("parsing message for container status %d: %v", idx, err)
-				}
-				taskResults, pipelineResourceResults := getResults(r)
-				taskRun.Status.TaskRunResults = append(taskRun.Status.TaskRunResults, taskResults...)
-				taskRun.Status.ResourcesResult = append(taskRun.Status.ResourcesResult, pipelineResourceResults...)
-			}
-		}
-		taskRun.Status.TaskRunResults = removeDuplicateResults(taskRun.Status.TaskRunResults)
-	}
-	return nil
-}
-
-func getResults(results []v1beta1.PipelineResourceResult) ([]v1beta1.TaskRunResult, []v1beta1.PipelineResourceResult) {
-	var taskResults []v1beta1.TaskRunResult
-	var pipelineResourceResults []v1beta1.PipelineResourceResult
-	for _, r := range results {
-		switch r.ResultType {
-		case v1beta1.TaskRunResultType:
-			taskRunResult := v1beta1.TaskRunResult{
-				Name:  r.Key,
-				Value: r.Value,
-			}
-			taskResults = append(taskResults, taskRunResult)
-		case v1beta1.PipelineResourceResultType:
-			fallthrough
-		default:
-			pipelineResourceResults = append(pipelineResourceResults, r)
-		}
-	}
-	return taskResults, pipelineResourceResults
-}
-
-func removeDuplicateResults(taskRunResult []v1beta1.TaskRunResult) []v1beta1.TaskRunResult {
-	uniq := make([]v1beta1.TaskRunResult, 0)
-	latest := make(map[string]v1beta1.TaskRunResult, 0)
-	for _, res := range taskRunResult {
-		if _, seen := latest[res.Name]; !seen {
-			uniq = append(uniq, res)
-		}
-		latest[res.Name] = res
-	}
-	for i, res := range uniq {
-		uniq[i] = latest[res.Name]
-	}
-	return uniq
-}
 
 func isExceededResourceQuotaError(err error) bool {
 	return err != nil && k8serrors.IsForbidden(err) && strings.Contains(err.Error(), "exceeded quota")
@@ -746,29 +720,6 @@ func storeTaskSpec(ctx context.Context, tr *v1beta1.TaskRun, ts *v1beta1.TaskSpe
 	// Only store the TaskSpec once, if it has never been set before.
 	if tr.Status.TaskSpec == nil {
 		tr.Status.TaskSpec = ts
-	}
-	return nil
-}
-
-// validateWorkspaceCompatibilityWithAffinityAssistant validates the TaskRun's compatibility
-// with the Affinity Assistant - if associated with an Affinity Assistant.
-// No more than one PVC-backed workspace can be used for a TaskRun that is associated with an
-// Affinity Assistant.
-func validateWorkspaceCompatibilityWithAffinityAssistant(tr *v1beta1.TaskRun) error {
-	_, isAssociatedWithAnAffinityAssistant := tr.Annotations[workspace.AnnotationAffinityAssistantName]
-	if !isAssociatedWithAnAffinityAssistant {
-		return nil
-	}
-
-	pvcWorkspaces := 0
-	for _, w := range tr.Spec.Workspaces {
-		if w.PersistentVolumeClaim != nil || w.VolumeClaimTemplate != nil {
-			pvcWorkspaces++
-		}
-	}
-
-	if pvcWorkspaces > 1 {
-		return fmt.Errorf("TaskRun mounts more than one PersistentVolumeClaim - that is forbidden when the Affinity Assistant is enabled")
 	}
 	return nil
 }

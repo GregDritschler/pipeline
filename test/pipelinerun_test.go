@@ -209,8 +209,6 @@ func TestPipelineRun(t *testing.T) {
 		t.Run(td.name, func(t *testing.T) {
 			td := td
 
-			SkipIfExcluded(t)
-
 			t.Parallel()
 			c, namespace := setup(t)
 
@@ -313,9 +311,9 @@ func getHelloWorldPipelineWithSingularTask(suffix int, namespace string) *v1beta
 				Name:    task1Name,
 				TaskRef: &v1beta1.TaskRef{Name: getName(taskName, suffix)},
 				Params: []v1beta1.Param{{
-					Name: "path", Value: v1beta1.NewArrayOrString("$(params.path)"),
+					Name: "path", Value: *v1beta1.NewArrayOrString("$(params.path)"),
 				}, {
-					Name: "dest", Value: v1beta1.NewArrayOrString("$(params.dest)"),
+					Name: "dest", Value: *v1beta1.NewArrayOrString("$(params.dest)"),
 				}},
 			}},
 		},
@@ -539,10 +537,10 @@ func getHelloWorldPipelineRun(suffix int, namespace string) *v1beta1.PipelineRun
 			PipelineRef: &v1beta1.PipelineRef{Name: getName(pipelineName, suffix)},
 			Params: []v1beta1.Param{{
 				Name:  "path",
-				Value: v1beta1.NewArrayOrString("docker://gcr.io/build-crd-testing/secret-sauce"),
+				Value: *v1beta1.NewArrayOrString("docker://gcr.io/build-crd-testing/secret-sauce"),
 			}, {
 				Name:  "dest",
-				Value: v1beta1.NewArrayOrString("dir:///tmp/"),
+				Value: *v1beta1.NewArrayOrString("dir:///tmp/"),
 			}},
 			ServiceAccountName: fmt.Sprintf("%s%d", saName, suffix),
 		},

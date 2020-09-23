@@ -128,16 +128,16 @@ spec:
   pipelineSpec:
     tasks:
     - name: task1
-      metadata:
-        labels:
-          pipeline-sdk-type: kfp
       taskSpec:
+        metadata:
+          labels:
+            pipeline-sdk-type: kfp
        ...
     - name: task2
-      metadata:
-        labels:
-          pipeline-sdk-type: tfx
       taskSpec:
+        metadata:
+          labels:
+            pipeline-sdk-type: tfx
        ...
 ```
 
@@ -456,6 +456,26 @@ False|PipelineRunCancelled|Yes|The `PipelineRun` was cancelled successfully.
 False|PipelineRunTimeout|Yes|The `PipelineRun` timed out.
 
 When a `PipelineRun` changes status, [events](events.md#pipelineruns) are triggered accordingly.
+
+When a `PipelineRun` has `Tasks` with [WhenExpressions](pipelines.md#guard-task-execution-using-whenexpressions):
+- If the `WhenExpressions` evaluate to `true`, the `Task` is executed and the `TaskRun` will be listed in the `Task Runs` section of the `status` of the `PipelineRun`.
+- If the `WhenExpressions` evaluate to `false`, the `Task` is skipped and it is listed in the `Skipped Tasks` section of the `status` of the `PipelineRun`. 
+
+```yaml
+Conditions:
+  Last Transition Time:  2020-08-27T15:07:34Z
+  Message:               Tasks Completed: 1 (Failed: 0, Cancelled 0), Skipped: 1
+  Reason:                Completed
+  Status:                True
+  Type:                  Succeeded
+Skipped Tasks:
+  Name:       skip-this-task
+Task Runs:
+  pipelinerun-to-skip-task-run-this-task-r2djj:
+    Pipeline Task Name:  run-this-task
+    Status:
+      ...
+```
 
 ## Cancelling a `PipelineRun`
 

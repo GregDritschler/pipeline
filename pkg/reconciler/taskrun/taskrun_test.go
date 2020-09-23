@@ -53,7 +53,6 @@ import (
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 	"knative.dev/pkg/apis"
-	duckv1beta1 "knative.dev/pkg/apis/duck/v1beta1"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
@@ -468,24 +467,21 @@ func TestReconcile_ExplicitDefaultSA(t *testing.T) {
 		),
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
+			saName := tc.taskRun.Spec.ServiceAccountName
+			if saName == "" {
+				saName = defaultSAName
+			}
+			d.ServiceAccounts = append(d.ServiceAccounts, &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      saName,
+					Namespace: tc.taskRun.Namespace,
+				},
+			})
 			names.TestingSeed()
 			testAssets, cancel := getTaskRunController(t, d)
 			defer cancel()
 			c := testAssets.Controller
 			clients := testAssets.Clients
-			saName := tc.taskRun.Spec.ServiceAccountName
-			if saName == "" {
-				saName = defaultSAName
-			}
-			t.Logf("Creating SA %s in %s", saName, tc.taskRun.Namespace)
-			if _, err := clients.Kube.CoreV1().ServiceAccounts(tc.taskRun.Namespace).Create(&corev1.ServiceAccount{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      saName,
-					Namespace: tc.taskRun.Namespace,
-				},
-			}); err != nil {
-				t.Fatal(err)
-			}
 
 			if err := c.Reconciler.Reconcile(context.Background(), getRunName(tc.taskRun)); err != nil {
 				t.Errorf("expected no error. Got error %v", err)
@@ -569,6 +565,7 @@ func TestReconcile_FeatureFlags(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-run-home-env",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -613,6 +610,7 @@ func TestReconcile_FeatureFlags(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-run-working-dir",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -937,6 +935,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-run-success",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -1032,6 +1031,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-substitution",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(
 					workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 						Name:         "tekton-creds-init-home-78c5n",
@@ -1165,6 +1165,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-with-taskspec",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-mz4c7",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -1238,6 +1239,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-with-cluster-task",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -1284,6 +1286,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-with-resource-spec",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-mz4c7",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -1357,6 +1360,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-with-pod",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -1402,6 +1406,7 @@ func TestReconcile(t *testing.T) {
 			tb.PodOwnerReference("TaskRun", "test-taskrun-with-credentials-variable",
 				tb.OwnerReferenceAPIVersion(currentAPIVersion)),
 			tb.PodSpec(
+				tb.PodServiceAccountName(config.DefaultServiceAccountValue),
 				tb.PodVolumes(workspaceVolume, homeVolume, resultsVolume, toolsVolume, downwardVolume, corev1.Volume{
 					Name:         "tekton-creds-init-home-9l9zj",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}},
@@ -2099,7 +2104,7 @@ func TestHandlePodCreationError(t *testing.T) {
 	}
 
 	// Prevent backoff timer from starting
-	c.timeoutHandler.SetTaskRunCallbackFunc(nil)
+	c.timeoutHandler.SetCallbackFunc(nil)
 
 	testcases := []struct {
 		description    string
@@ -2313,277 +2318,6 @@ func TestReconcileCloudEvents(t *testing.T) {
 			t.Log(tr.Status.CloudEvents)
 			if d := cmp.Diff(tc.wantCloudEvents, tr.Status.CloudEvents, opts...); d != "" {
 				t.Errorf("Unexpected status of cloud events %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResourceResult(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		pod           corev1.Pod
-		taskRunStatus *v1beta1.TaskRunStatus
-		want          []resourcev1alpha1.PipelineResourceResult
-	}{{
-		desc: "image resource updated",
-		pod: corev1.Pod{
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `[{"key":"digest","value":"sha256:1234","resourceRef":{"name":"source-image"}}]`,
-						},
-					},
-				}},
-			},
-		},
-		want: []resourcev1alpha1.PipelineResourceResult{{
-			Key:         "digest",
-			Value:       "sha256:1234",
-			ResourceRef: resourcev1alpha1.PipelineResourceRef{Name: "source-image"},
-		}},
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			tr := &v1beta1.TaskRun{}
-			tr.Status.SetCondition(&apis.Condition{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-			})
-			if err := updateTaskRunResourceResult(tr, c.pod); err != nil {
-				t.Errorf("updateTaskRunResourceResult: %s", err)
-			}
-			if d := cmp.Diff(c.want, tr.Status.ResourcesResult); d != "" {
-				t.Errorf("updateTaskRunResourceResult %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResult(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		pod           corev1.Pod
-		taskRunStatus *v1beta1.TaskRunStatus
-		wantResults   []v1beta1.TaskRunResult
-		want          []resourcev1alpha1.PipelineResourceResult
-	}{{
-		desc: "test result with pipeline result",
-		pod: corev1.Pod{
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `[{"key":"resultName","value":"resultValue", "type": "TaskRunResult"}, {"key":"digest","value":"sha256:1234","resourceRef":{"name":"source-image"}, "type": "PipelineResourceResult"}]`,
-						},
-					},
-				}},
-			},
-		},
-		wantResults: []v1beta1.TaskRunResult{{
-			Name:  "resultName",
-			Value: "resultValue",
-		}},
-		want: []resourcev1alpha1.PipelineResourceResult{{
-			Key:         "digest",
-			Value:       "sha256:1234",
-			ResourceRef: resourcev1alpha1.PipelineResourceRef{Name: "source-image"},
-			ResultType:  "PipelineResourceResult",
-		}},
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			tr := &v1beta1.TaskRun{}
-			tr.Status.SetCondition(&apis.Condition{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-			})
-			if err := updateTaskRunResourceResult(tr, c.pod); err != nil {
-				t.Errorf("updateTaskRunResourceResult: %s", err)
-			}
-			if d := cmp.Diff(c.wantResults, tr.Status.TaskRunResults); d != "" {
-				t.Errorf("updateTaskRunResourceResult TaskRunResults %s", diff.PrintWantGot(d))
-			}
-			if d := cmp.Diff(c.want, tr.Status.ResourcesResult); d != "" {
-				t.Errorf("updateTaskRunResourceResult ResourcesResult %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResult2(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		pod           corev1.Pod
-		taskRunStatus *v1beta1.TaskRunStatus
-		wantResults   []v1beta1.TaskRunResult
-		want          []resourcev1alpha1.PipelineResourceResult
-	}{{
-		desc: "test result with pipeline result - no result type",
-		pod: corev1.Pod{
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `[{"key":"resultName","value":"resultValue", "type": "TaskRunResult"}, {"key":"digest","value":"sha256:1234","resourceRef":{"name":"source-image"}}]`,
-						},
-					},
-				}},
-			},
-		},
-		wantResults: []v1beta1.TaskRunResult{{
-			Name:  "resultName",
-			Value: "resultValue",
-		}},
-		want: []resourcev1alpha1.PipelineResourceResult{{
-			Key:         "digest",
-			Value:       "sha256:1234",
-			ResourceRef: resourcev1alpha1.PipelineResourceRef{Name: "source-image"},
-		}},
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			tr := &v1beta1.TaskRun{}
-			tr.Status.SetCondition(&apis.Condition{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-			})
-			if err := updateTaskRunResourceResult(tr, c.pod); err != nil {
-				t.Errorf("updateTaskRunResourceResult: %s", err)
-			}
-			if d := cmp.Diff(c.wantResults, tr.Status.TaskRunResults); d != "" {
-				t.Errorf("updateTaskRunResourceResult %s", diff.PrintWantGot(d))
-			}
-			if d := cmp.Diff(c.want, tr.Status.ResourcesResult); d != "" {
-				t.Errorf("updateTaskRunResourceResult %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResultTwoResults(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		pod           corev1.Pod
-		taskRunStatus *v1beta1.TaskRunStatus
-		want          []v1beta1.TaskRunResult
-	}{{
-		desc: "two test results",
-		pod: corev1.Pod{
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `[{"key":"resultNameOne","value":"resultValueOne", "type": "TaskRunResult"},{"key":"resultNameTwo","value":"resultValueTwo", "type": "TaskRunResult"}]`,
-						},
-					},
-				}, {
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `[{"key":"resultNameOne","value":"resultValueThree", "type": "TaskRunResult"},{"key":"resultNameTwo","value":"resultValueTwo", "type": "TaskRunResult"}]`,
-						},
-					},
-				}},
-			},
-		},
-		want: []v1beta1.TaskRunResult{{
-			Name:  "resultNameOne",
-			Value: "resultValueThree",
-		}, {
-			Name:  "resultNameTwo",
-			Value: "resultValueTwo",
-		}},
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			tr := &v1beta1.TaskRun{}
-			tr.Status.SetCondition(&apis.Condition{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-			})
-			if err := updateTaskRunResourceResult(tr, c.pod); err != nil {
-				t.Errorf("updateTaskRunResourceResult: %s", err)
-			}
-			if d := cmp.Diff(c.want, tr.Status.TaskRunResults); d != "" {
-				t.Errorf("updateTaskRunResourceResult %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResultWhenTaskFailed(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		podStatus     corev1.PodStatus
-		taskRunStatus *v1beta1.TaskRunStatus
-		wantResults   []v1beta1.TaskRunResult
-		want          []resourcev1alpha1.PipelineResourceResult
-	}{{
-		desc: "update task results when task fails",
-		podStatus: corev1.PodStatus{
-			ContainerStatuses: []corev1.ContainerStatus{{
-				State: corev1.ContainerState{
-					Terminated: &corev1.ContainerStateTerminated{
-						Message: `[{"key":"resultName","value":"resultValue", "type": "TaskRunResult"}, {"name":"source-image","digest":"sha256:1234"}]`,
-					},
-				},
-			}},
-		},
-		taskRunStatus: &v1beta1.TaskRunStatus{
-			Status: duckv1beta1.Status{Conditions: []apis.Condition{{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionFalse,
-			}}},
-		},
-		wantResults: nil,
-		want:        nil,
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			if d := cmp.Diff(c.want, c.taskRunStatus.ResourcesResult); d != "" {
-				t.Errorf("updateTaskRunResourceResult resources %s", diff.PrintWantGot(d))
-			}
-			if d := cmp.Diff(c.wantResults, c.taskRunStatus.TaskRunResults); d != "" {
-				t.Errorf("updateTaskRunResourceResult results %s", diff.PrintWantGot(d))
-			}
-		})
-	}
-}
-
-func TestUpdateTaskRunResourceResult_Errors(t *testing.T) {
-	for _, c := range []struct {
-		desc          string
-		pod           corev1.Pod
-		taskRunStatus *v1beta1.TaskRunStatus
-		want          []resourcev1alpha1.PipelineResourceResult
-	}{{
-		desc: "image resource exporter with malformed json output",
-		pod: corev1.Pod{
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							Message: `MALFORMED JSON{"digest":"sha256:1234"}`,
-						},
-					},
-				}},
-			},
-		},
-		taskRunStatus: &v1beta1.TaskRunStatus{
-			Status: duckv1beta1.Status{Conditions: []apis.Condition{{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-			}}},
-		},
-		want: nil,
-	}} {
-		t.Run(c.desc, func(t *testing.T) {
-			names.TestingSeed()
-			if err := updateTaskRunResourceResult(&v1beta1.TaskRun{Status: *c.taskRunStatus}, c.pod); err == nil {
-				t.Error("Expected error, got nil")
-			}
-			if d := cmp.Diff(c.want, c.taskRunStatus.ResourcesResult); d != "" {
-				t.Errorf("updateTaskRunResourceResult %s", diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -3076,12 +2810,13 @@ func TestReconcileWorkspaceWithVolumeClaimTemplate(t *testing.T) {
 
 func TestFailTaskRun(t *testing.T) {
 	testCases := []struct {
-		name           string
-		taskRun        *v1beta1.TaskRun
-		pod            *corev1.Pod
-		reason         v1beta1.TaskRunReason
-		message        string
-		expectedStatus apis.Condition
+		name               string
+		taskRun            *v1beta1.TaskRun
+		pod                *corev1.Pod
+		reason             v1beta1.TaskRunReason
+		message            string
+		expectedStatus     apis.Condition
+		expectedStepStates []v1beta1.StepState
 	}{{
 		name: "no-pod-scheduled",
 		taskRun: tb.TaskRun("test-taskrun-run-failed", tb.TaskRunNamespace("foo"), tb.TaskRunSpec(
@@ -3120,6 +2855,180 @@ func TestFailTaskRun(t *testing.T) {
 			Reason:  "some reason",
 			Message: "some message",
 		},
+	}, {
+		name: "step-status-update-cancel",
+		taskRun: tb.TaskRun("test-taskrun-run-cancel", tb.TaskRunNamespace("foo"), tb.TaskRunSpec(
+			tb.TaskRunTaskRef(simpleTask.Name),
+			tb.TaskRunCancelled,
+		), tb.TaskRunStatus(tb.StatusCondition(apis.Condition{
+			Type:   apis.ConditionSucceeded,
+			Status: corev1.ConditionUnknown,
+		}), tb.StepState(
+			tb.SetStepStateRunning(corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}}),
+		), tb.PodName("foo-is-bar"))),
+		pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "foo",
+			Name:      "foo-is-bar",
+		}},
+		reason:  v1beta1.TaskRunReasonCancelled,
+		message: "TaskRun test-taskrun-run-cancel was cancelled",
+		expectedStatus: apis.Condition{
+			Type:    apis.ConditionSucceeded,
+			Status:  corev1.ConditionFalse,
+			Reason:  v1beta1.TaskRunReasonCancelled.String(),
+			Message: "TaskRun test-taskrun-run-cancel was cancelled",
+		},
+		expectedStepStates: []v1beta1.StepState{
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonCancelled.String(),
+					},
+				},
+			},
+		},
+	}, {
+		name: "step-status-update-timeout",
+		taskRun: tb.TaskRun("test-taskrun-run-timeout", tb.TaskRunNamespace("foo"), tb.TaskRunSpec(
+			tb.TaskRunTaskRef(simpleTask.Name),
+			tb.TaskRunTimeout(time.Duration(10*time.Second)),
+		), tb.TaskRunStatus(tb.StatusCondition(apis.Condition{
+			Type:   apis.ConditionSucceeded,
+			Status: corev1.ConditionUnknown,
+		}), tb.StepState(
+			tb.SetStepStateRunning(corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}}),
+		), tb.PodName("foo-is-bar"))),
+		pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "foo",
+			Name:      "foo-is-bar",
+		}},
+		reason:  v1beta1.TaskRunReasonTimedOut,
+		message: "TaskRun test-taskrun-run-timeout failed to finish within 10s",
+		expectedStatus: apis.Condition{
+			Type:    apis.ConditionSucceeded,
+			Status:  corev1.ConditionFalse,
+			Reason:  v1beta1.TaskRunReasonTimedOut.String(),
+			Message: "TaskRun test-taskrun-run-timeout failed to finish within 10s",
+		},
+		expectedStepStates: []v1beta1.StepState{
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+		},
+	}, {
+		name: "step-status-update-multiple-steps",
+		taskRun: tb.TaskRun("test-taskrun-run-timeout-multiple-steps", tb.TaskRunNamespace("foo"), tb.TaskRunSpec(
+			tb.TaskRunTaskRef(taskMultipleSteps.Name),
+			tb.TaskRunTimeout(time.Duration(10*time.Second)),
+		), tb.TaskRunStatus(tb.StatusCondition(apis.Condition{
+			Type:   apis.ConditionSucceeded,
+			Status: corev1.ConditionUnknown,
+		}), tb.StepState(
+			tb.SetStepStateTerminated(corev1.ContainerStateTerminated{StartedAt: metav1.Time{Time: time.Now()}, FinishedAt: metav1.Time{Time: time.Now()}, Reason: "Completed"}),
+		), tb.StepState(
+			tb.SetStepStateRunning(corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}}),
+		), tb.StepState(
+			tb.SetStepStateRunning(corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}}),
+		),
+			tb.PodName("foo-is-bar"))),
+		pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "foo",
+			Name:      "foo-is-bar",
+		}},
+		reason:  v1beta1.TaskRunReasonTimedOut,
+		message: "TaskRun test-taskrun-run-timeout-multiple-steps failed to finish within 10s",
+		expectedStatus: apis.Condition{
+			Type:    apis.ConditionSucceeded,
+			Status:  corev1.ConditionFalse,
+			Reason:  v1beta1.TaskRunReasonTimedOut.String(),
+			Message: "TaskRun test-taskrun-run-timeout-multiple-steps failed to finish within 10s",
+		},
+		expectedStepStates: []v1beta1.StepState{
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Reason:   "Completed",
+					},
+				},
+			},
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+		},
+	}, {
+		name: "step-status-update-multiple-steps-waiting-state",
+		taskRun: tb.TaskRun("test-taskrun-run-timeout-multiple-steps-waiting", tb.TaskRunNamespace("foo"), tb.TaskRunSpec(
+			tb.TaskRunTaskRef(taskMultipleSteps.Name),
+			tb.TaskRunTimeout(time.Duration(10*time.Second)),
+		), tb.TaskRunStatus(tb.StatusCondition(apis.Condition{
+			Type:   apis.ConditionSucceeded,
+			Status: corev1.ConditionUnknown,
+		}), tb.StepState(
+			tb.SetStepStateWaiting(corev1.ContainerStateWaiting{Reason: "PodInitializing"}),
+		), tb.StepState(
+			tb.SetStepStateWaiting(corev1.ContainerStateWaiting{Reason: "PodInitializing"}),
+		), tb.StepState(
+			tb.SetStepStateWaiting(corev1.ContainerStateWaiting{Reason: "PodInitializing"}),
+		),
+			tb.PodName("foo-is-bar"))),
+		pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "foo",
+			Name:      "foo-is-bar",
+		}},
+		reason:  v1beta1.TaskRunReasonTimedOut,
+		message: "TaskRun test-taskrun-run-timeout-multiple-steps-waiting failed to finish within 10s",
+		expectedStatus: apis.Condition{
+			Type:    apis.ConditionSucceeded,
+			Status:  corev1.ConditionFalse,
+			Reason:  v1beta1.TaskRunReasonTimedOut.String(),
+			Message: "TaskRun test-taskrun-run-timeout-multiple-steps-waiting failed to finish within 10s",
+		},
+		expectedStepStates: []v1beta1.StepState{
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+			{
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   v1beta1.TaskRunReasonTimedOut.String(),
+					},
+				},
+			},
+		},
 	}}
 
 	for _, tc := range testCases {
@@ -3155,6 +3064,13 @@ func TestFailTaskRun(t *testing.T) {
 			}
 			if d := cmp.Diff(tc.taskRun.Status.GetCondition(apis.ConditionSucceeded), &tc.expectedStatus, ignoreLastTransitionTime); d != "" {
 				t.Fatalf(diff.PrintWantGot(d))
+			}
+
+			if tc.expectedStepStates != nil {
+				ignoreTerminatedFields := cmpopts.IgnoreFields(corev1.ContainerStateTerminated{}, "StartedAt", "FinishedAt")
+				if c := cmp.Diff(tc.expectedStepStates, tc.taskRun.Status.Steps, ignoreTerminatedFields); c != "" {
+					t.Errorf("test %s failed: %s", tc.name, diff.PrintWantGot(c))
+				}
 			}
 		})
 	}

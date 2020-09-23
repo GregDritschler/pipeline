@@ -54,6 +54,7 @@ import (
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	fakeconfigmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap/fake"
 	fakepodinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod/fake"
+	fakeserviceaccountinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/serviceaccount/fake"
 	"knative.dev/pkg/controller"
 )
 
@@ -71,6 +72,7 @@ type Data struct {
 	Pods              []*corev1.Pod
 	Namespaces        []*corev1.Namespace
 	ConfigMaps        []*corev1.ConfigMap
+	ServiceAccounts   []*corev1.ServiceAccount
 }
 
 // Clients holds references to clients which are useful for reconciler tests.
@@ -93,6 +95,7 @@ type Informers struct {
 	Run              informersv1alpha1.RunInformer
 	Pod              coreinformers.PodInformer
 	ConfigMap        coreinformers.ConfigMapInformer
+	ServiceAccount   coreinformers.ServiceAccountInformer
 }
 
 // Assets holds references to the controller, logs, clients, and informers.
@@ -171,6 +174,7 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 		Run:              fakeruninformer.Get(ctx),
 		Pod:              fakepodinformer.Get(ctx),
 		ConfigMap:        fakeconfigmapinformer.Get(ctx),
+		ServiceAccount:   fakeserviceaccountinformer.Get(ctx),
 	}
 
 	// Attach reactors that add resource mutations to the appropriate
@@ -249,6 +253,13 @@ func SeedTestData(t *testing.T, ctx context.Context, d Data) (Clients, Informers
 	for _, cm := range d.ConfigMaps {
 		cm := cm.DeepCopy() // Avoid assumptions that the informer's copy is modified.
 		if _, err := c.Kube.CoreV1().ConfigMaps(cm.Namespace).Create(cm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Kube.PrependReactor("*", "serviceaccounts", AddToInformer(t, i.ServiceAccount.Informer().GetIndexer()))
+	for _, sa := range d.ServiceAccounts {
+		sa := sa.DeepCopy() // Avoid assumptions that the informer's copy is modified.
+		if _, err := c.Kube.CoreV1().ServiceAccounts(sa.Namespace).Create(sa); err != nil {
 			t.Fatal(err)
 		}
 	}

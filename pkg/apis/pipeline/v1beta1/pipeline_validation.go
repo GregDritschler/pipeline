@@ -212,6 +212,10 @@ func (ps *PipelineSpec) Validate(ctx context.Context) *apis.FieldError {
 		return err
 	}
 
+	if err := validateWhenExpressions(ps.Tasks); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -356,44 +360,19 @@ func validatePipelineParameterVariables(tasks []PipelineTask, params []ParamSpec
 		}
 	}
 
-	return validatePipelineVariables(tasks, "params", parameterNames, arrayParameterNames)
+	return validatePipelineParametersVariables(tasks, "params", parameterNames, arrayParameterNames)
 }
 
-func validatePipelineVariables(tasks []PipelineTask, prefix string, paramNames sets.String, arrayParamNames sets.String) *apis.FieldError {
+func validatePipelineParametersVariables(tasks []PipelineTask, prefix string, paramNames sets.String, arrayParamNames sets.String) *apis.FieldError {
 	for _, task := range tasks {
-		for _, param := range task.Params {
-			if param.Value.Type == ParamTypeString {
-				if err := validatePipelineVariable(fmt.Sprintf("param[%s]", param.Name), param.Value.StringVal, prefix, paramNames); err != nil {
-					return err
-				}
-				if err := validatePipelineNoArrayReferenced(fmt.Sprintf("param[%s]", param.Name), param.Value.StringVal, prefix, arrayParamNames); err != nil {
-					return err
-				}
-			} else {
-				for _, arrayElement := range param.Value.ArrayVal {
-					if err := validatePipelineVariable(fmt.Sprintf("param[%s]", param.Name), arrayElement, prefix, paramNames); err != nil {
-						return err
-					}
-					if err := validatePipelineArraysIsolated(fmt.Sprintf("param[%s]", param.Name), arrayElement, prefix, arrayParamNames); err != nil {
-						return err
-					}
-				}
-			}
+		if err := validatePipelineParametersVariablesInTaskParameters(task.Params, prefix, paramNames, arrayParamNames); err != nil {
+			return err
+		}
+		if err := task.WhenExpressions.validatePipelineParametersVariables(prefix, paramNames, arrayParamNames); err != nil {
+			return err
 		}
 	}
 	return nil
-}
-
-func validatePipelineVariable(name, value, prefix string, vars sets.String) *apis.FieldError {
-	return substitution.ValidateVariable(name, value, prefix, "task parameter", "pipelinespec.params", vars)
-}
-
-func validatePipelineNoArrayReferenced(name, value, prefix string, vars sets.String) *apis.FieldError {
-	return substitution.ValidateVariableProhibited(name, value, prefix, "task parameter", "pipelinespec.params", vars)
-}
-
-func validatePipelineArraysIsolated(name, value, prefix string, vars sets.String) *apis.FieldError {
-	return substitution.ValidateVariableIsolated(name, value, prefix, "task parameter", "pipelinespec.params", vars)
 }
 
 func validatePipelineContextVariables(tasks []PipelineTask) *apis.FieldError {
@@ -488,6 +467,9 @@ func validateFinalTasks(finalTasks []PipelineTask) *apis.FieldError {
 		if len(f.Conditions) != 0 {
 			return apis.ErrInvalidValue(fmt.Sprintf("no conditions allowed under spec.finally, final task %s has conditions specified", f.Name), "spec.finally")
 		}
+		if len(f.WhenExpressions) != 0 {
+			return apis.ErrInvalidValue(fmt.Sprintf("no when expressions allowed under spec.finally, final task %s has when expressions specified", f.Name), "spec.finally")
+		}
 	}
 
 	if err := validateTaskResultReferenceNotUsed(finalTasks); err != nil {
@@ -528,6 +510,26 @@ func validateTasksInputFrom(tasks []PipelineTask) *apis.FieldError {
 					" final task %s has from specified", rd.Name), "spec.finally.task.resources.inputs")
 			}
 		}
+	}
+	return nil
+}
+
+func validateWhenExpressions(tasks []PipelineTask) *apis.FieldError {
+	for i, t := range tasks {
+		if err := validateOneOfWhenExpressionsOrConditions(i, t); err != nil {
+			return err
+		}
+		if err := t.WhenExpressions.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOneOfWhenExpressionsOrConditions(i int, t PipelineTask) *apis.FieldError {
+	prefix := "spec.tasks"
+	if t.WhenExpressions != nil && t.Conditions != nil {
+		return apis.ErrMultipleOneOf(fmt.Sprintf(fmt.Sprintf(prefix+"[%d].when", i), fmt.Sprintf(prefix+"[%d].conditions", i)))
 	}
 	return nil
 }
