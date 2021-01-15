@@ -380,6 +380,7 @@ func (c *Reconciler) reconcile(ctx context.Context, tr *v1beta1.TaskRun, rtr *re
 	if tr.Status.PodName != "" {
 		pod, err = c.KubeClientSet.CoreV1().Pods(tr.Namespace).Get(ctx, tr.Status.PodName, metav1.GetOptions{})
 		if k8serrors.IsNotFound(err) {
+			logger.Infof("GMD1 Pod name %s is set in TaskRun %s status but k8 api cannot find it", tr.Status.PodName, tr.Name)
 			// Keep going, this will result in the Pod being created below.
 		} else if err != nil {
 			// This is considered a transient error, so we return error, do not update
@@ -389,8 +390,10 @@ func (c *Reconciler) reconcile(ctx context.Context, tr *v1beta1.TaskRun, rtr *re
 			return err
 		}
 	} else {
+		labelSelector := getLabelSelector(tr)
+		logger.Infof("GMD2 Pod name is not set in TaskRun %s status. Searching with label selector %s", tr.Name, labelSelector)
 		pos, err := c.KubeClientSet.CoreV1().Pods(tr.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: getLabelSelector(tr),
+			LabelSelector: labelSelector,
 		})
 		if err != nil {
 			logger.Errorf("Error listing pods: %v", err)
@@ -398,8 +401,14 @@ func (c *Reconciler) reconcile(ctx context.Context, tr *v1beta1.TaskRun, rtr *re
 		}
 		for index := range pos.Items {
 			po := pos.Items[index]
-			if metav1.IsControlledBy(&po, tr) && !podconvert.DidTaskRunFail(&po) {
-				pod = &po
+			logger.Infof("GMD3 Evaluating pod %s", po.Name)
+			if metav1.IsControlledBy(&po, tr) {
+				if !podconvert.DidTaskRunFail(&po) {
+					pod = &po
+					logger.Infof("GMD4 Adopted pod %s", po.Name)
+				} else {
+					logger.Infof("GMD5 Pod %s not adopted due to failure", po.Name)
+				}
 			}
 		}
 	}
@@ -676,9 +685,12 @@ func (c *Reconciler) createPod(ctx context.Context, tr *v1beta1.TaskRun, rtr *re
 	}
 
 	pod, err = c.KubeClientSet.CoreV1().Pods(tr.Namespace).Create(ctx, pod, metav1.CreateOptions{})
-	if err == nil && willOverwritePodSetAffinity(tr) {
-		if recorder := controller.GetEventRecorder(ctx); recorder != nil {
-			recorder.Eventf(tr, corev1.EventTypeWarning, "PodAffinityOverwrite", "Pod template affinity is overwritten by affinity assistant for pod %q", pod.Name)
+	if err == nil {
+		logger.Infof("GMD6 Created pod %s for TaskRun %s with labels %v", pod.Name, tr.Name, pod.Labels)
+		if willOverwritePodSetAffinity(tr) {
+			if recorder := controller.GetEventRecorder(ctx); recorder != nil {
+				recorder.Eventf(tr, corev1.EventTypeWarning, "PodAffinityOverwrite", "Pod template affinity is overwritten by affinity assistant for pod %q", pod.Name)
+			}
 		}
 	}
 	return pod, err
